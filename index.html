@@ -616,6 +616,19 @@
       border-color: rgba(245, 158, 11, 0.4);
       box-shadow: 0 0 10px rgba(245, 158, 11, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
     }
+    /* Revisi UI: seluruh teks di dalam kolom/panel chat memakai ukuran 6px agar
+       kronologi panjang sangat ringkas, line-height 1.25, tetap dapat diblok & di-copy. */
+    #pulse-chat-panel,
+    #pulse-chat-panel * {
+      font-size: 6px !important;
+      line-height: 1.25 !important;
+    }
+    #pulse-chat-panel *,
+    #pulse-chat-panel textarea,
+    #pulse-chat-panel input {
+      user-select: text;
+      -webkit-user-select: text;
+    }
   </style>
   <script>
     // =========================================================================
