@@ -747,6 +747,9 @@
       User: ['nav-dashboard', 'nav-grapari', 'action-export']
     };
 
+    // Menu yang wajib selalu dimiliki role Admin agar tidak terkunci dari pengaturan.
+    const PULSE_ADMIN_REQUIRED_MENUS = ['nav-dashboard', 'action-users'];
+
     function normalizeRoleMenus(raw) {
       const src = (raw && typeof raw === 'object') ? raw : {};
       const out = {};
@@ -754,7 +757,10 @@
         const list = Array.isArray(src[role]) ? src[role] : PULSE_DEFAULT_ROLE_MENUS[role];
         out[role] = window.PULSE_MENU_DEFS.filter(d => list.includes(d.key)).map(d => d.key);
       });
-      out.Admin = window.PULSE_MENU_DEFS.map(d => d.key);
+      // Anti-lockout: Admin wajib tetap punya Dashboard & Manajemen User.
+      PULSE_ADMIN_REQUIRED_MENUS.forEach(key => {
+        if (out.Admin.indexOf(key) === -1) out.Admin.push(key);
+      });
       return out;
     }
 
@@ -773,10 +779,14 @@
 
     function computeAllowedMenus(role) {
       const roleName = String(role || '');
-      if (roleName.toLowerCase() === 'admin') {
-        return window.PULSE_MENU_DEFS.map(d => d.key);
-      }
       const cfg = window.PULSE_ROLE_MENUS || PULSE_DEFAULT_ROLE_MENUS;
+      if (roleName.toLowerCase() === 'admin') {
+        const source = Array.isArray(cfg.Admin) ? cfg.Admin : PULSE_DEFAULT_ROLE_MENUS.Admin;
+        const set = new Set(source);
+        // Anti-lockout: Admin wajib tetap punya Dashboard & Manajemen User.
+        PULSE_ADMIN_REQUIRED_MENUS.forEach(key => set.add(key));
+        return window.PULSE_MENU_DEFS.filter(d => set.has(d.key)).map(d => d.key);
+      }
       const source = Array.isArray(cfg[roleName]) ? cfg[roleName] : PULSE_DEFAULT_ROLE_MENUS.User;
       return window.PULSE_MENU_DEFS
         .filter(d => source.includes(d.key) && !d.adminOnly)
@@ -1689,6 +1699,12 @@
               <input id="grapari-only-with-tickets" type="checkbox" onchange="renderGrapariEscalationPage()" class="rounded accent-orange-500" />
               <span>Hanya yang ada tiket</span>
             </label>
+
+            <button type="button" onclick="exportGrapariExcel()"
+              class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer whitespace-nowrap"
+              title="Unduh data tiket sesuai filter aktif (hanya pool yang ada tiket).">
+              Export Excel Tiket
+            </button>
           </div>
         </div>
 
@@ -1846,7 +1862,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h5 class="text-sm font-extrabold text-white">Hak Akses Menu per Role</h5>
-              <p class="text-[11px] text-slate-400">Pilih menu yang tampil pada navigasi sesuai role user. Menu aksi khusus (Upload Data, Last Activity, Manajemen User) hanya berlaku untuk role Admin.</p>
+              <p class="text-[11px] text-slate-400">Pilih menu yang tampil pada navigasi sesuai role user. Menu aksi khusus (Upload Data, Last Activity, Manajemen User) hanya berlaku untuk role Admin. Kolom Admin kini dapat diatur langsung; menu Dashboard &amp; Manajemen User wajib aktif untuk Admin (anti-lockout).</p>
             </div>
             <button type="button" onclick="saveRoleMenus()"
               class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer">
@@ -4661,21 +4677,11 @@
       return keep;
     }
 
-    function renderGrapariEscalationPage() {
-      refreshTicketTimeMetrics();
+    // Baris pool Grapari + metrik sesuai filter aktif (dipakai tabel & export Excel).
+    function getGrapariFilteredRows(baseTickets) {
       const poolTypeFilter = document.getElementById('grapari-pool-type-filter')?.value || 'Grapari';
       const searchKw = (document.getElementById('grapari-search-input')?.value || '').trim().toLowerCase();
       const onlyWithTickets = Boolean(document.getElementById('grapari-only-with-tickets')?.checked);
-
-      const baseTicketsAll = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
-        if (globalSiteFilter !== 'ALL' && t.SITE !== globalSiteFilter) return false;
-        return true;
-      });
-
-      // Filter UNIT_NAME (dinamis, terkelompok per Site): memengaruhi tiket, metrik/ringkasan, dan tabel.
-      const unitNameFilter = syncGrapariUnitNameOptions(baseTicketsAll);
-      const matchUnit = getGrapariUnitFilterPredicate(unitNameFilter);
-      const baseTickets = baseTicketsAll.filter(matchUnit);
 
       const ticketsByCode = new Map();
       baseTickets.forEach(t => {
@@ -4703,11 +4709,37 @@
         return true;
       });
 
-      const rowsWithMetrics = filteredRefs.map(ref => {
+      return filteredRefs.map(ref => {
         const tList = ticketsByCode.get(ref.pool.toUpperCase()) || [];
         const m = computeKpiMetrics(tList);
         return { ref, tList, m };
       }).sort((a, b) => b.m.total - a.m.total || a.ref.detail.localeCompare(b.ref.detail));
+    }
+
+    // Dasar tiket Grapari sesuai filter global (channel + site) dan filter UNIT_NAME.
+    function getGrapariBaseTickets() {
+      const base = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
+        if (globalSiteFilter !== 'ALL' && t.SITE !== globalSiteFilter) return false;
+        return true;
+      });
+      const matchUnit = getGrapariUnitFilterPredicate(getGrapariUnitNameFilterValue());
+      return base.filter(matchUnit);
+    }
+
+    function renderGrapariEscalationPage() {
+      refreshTicketTimeMetrics();
+
+      const baseTicketsAll = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
+        if (globalSiteFilter !== 'ALL' && t.SITE !== globalSiteFilter) return false;
+        return true;
+      });
+
+      // Filter UNIT_NAME (dinamis, terkelompok per Site): memengaruhi tiket, metrik/ringkasan, dan tabel.
+      const unitNameFilter = syncGrapariUnitNameOptions(baseTicketsAll);
+      const matchUnit = getGrapariUnitFilterPredicate(unitNameFilter);
+      const baseTickets = baseTicketsAll.filter(matchUnit);
+
+      const rowsWithMetrics = getGrapariFilteredRows(baseTickets);
 
       const allMatchedTickets = rowsWithMetrics.flatMap(r => r.tList);
       const agg = computeKpiMetrics(allMatchedTickets);
@@ -4789,6 +4821,55 @@
         `;
       }).join('');
     }
+
+    // Export Excel Report Eskalasi Grapari: sesuai filter aktif, hanya tiket yang ada.
+    window.exportGrapariExcel = async function exportGrapariExcel() {
+      const ready = await window.ensureXlsxLoaded();
+      if (!ready || typeof XLSX === 'undefined') {
+        window.showToast('Library Excel belum termuat. Periksa koneksi internet Anda.', 'error');
+        return;
+      }
+      refreshTicketTimeMetrics();
+      const rowsWithMetrics = getGrapariFilteredRows(getGrapariBaseTickets());
+      const tickets = rowsWithMetrics.flatMap(r => r.tList);
+      if (tickets.length === 0) {
+        window.showToast('Tidak ada tiket untuk diekspor pada filter aktif.', 'info');
+        return;
+      }
+      // Catatan lengkap (tanpa terpotong) untuk Admin; role lain tetap tersamarkan (kebijakan PII).
+      const canExportRawPii = window.isCurrentUserAdmin();
+      const dataRows = tickets.map(t => {
+        const lookup = t.POOL_LOOKUP || null;
+        const poolCode = t.POOL_CODE || t.POOL;
+        const poolDetail = lookup ? lookup.detail : poolCode;
+        const namaPool = lookup ? lookup.namaPool : t.POOL;
+        const prioritas = t.PRIORITY_LEVEL > 0 ? `P${t.PRIORITY_LEVEL}` : 'Closed';
+        const statusSla = `${t.CASE_STATUS} / ${t.SLA_STATUS}`;
+        const sisaSlTtr = t.IS_CLOSED
+          ? `${Number(t.TTR_HOURS || 0).toFixed(1)} j (TTR)`
+          : `Sisa ${getRemainingHours(t).toFixed(1)} j`;
+        return {
+          'CASE_ID': t.CASE_ID,
+          'UNIT_NAME': t.UNIT_NAME,
+          'Pool Detail': poolDetail,
+          'Nama Pool': namaPool,
+          'POOL': poolCode,
+          'ID Remedy': t.ID_REMEDY,
+          'Prioritas': prioritas,
+          'Status / SLA': statusSla,
+          'Sisa SL / TTR': sisaSlTtr,
+          'KIP (CASE_TYPE_3)': t.CASE_TYPE_3,
+          'CASE_NOTES all': canExportRawPii ? t.CASE_NOTES : maskPlainText(t.CASE_NOTES)
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(dataRows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Eskalasi_Grapari');
+      const ymd = formatDateYMD(new Date()).replace(/-/g, '');
+      const fileName = `Eskalasi_Grapari_${ymd}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      window.showToast(`${fileName} berhasil diunduh (${tickets.length} tiket).`, 'success');
+    };
 
     // =========================================================================
     // 8. MODAL DRILL-DOWN, USER MANAGEMENT (RBAC) & COPY HELPERS
@@ -5127,6 +5208,10 @@
         const adminChecked = adminSet.has(def.key) ? 'checked' : '';
         const userChecked = userSet.has(def.key) ? 'checked' : '';
         const userDisabled = def.adminOnly ? 'disabled' : '';
+        const adminRequired = PULSE_ADMIN_REQUIRED_MENUS.indexOf(def.key) !== -1;
+        const adminTitle = adminRequired
+          ? ' title="Wajib aktif untuk Admin (anti-lockout)"'
+          : ' title="Klik untuk mengatur hak akses menu role Admin"';
         return `
           <div class="role-menu-item flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-900/60 border border-slate-800 px-3 py-2">
             <div class="min-w-[160px]">
@@ -5134,8 +5219,8 @@
               <p class="role-menu-item-key text-[10px] text-slate-500 font-mono">${escapeHtmlAttr(def.key)}</p>
             </div>
             <div class="flex items-center gap-4">
-              <label class="role-menu-label-admin flex items-center gap-1.5 text-[11px] font-semibold text-orange-300">
-                <input type="checkbox" data-menu-role="Admin" value="${def.key}" ${adminChecked} disabled class="accent-orange-500" />
+              <label class="role-menu-label-admin flex items-center gap-1.5 text-[11px] font-semibold text-orange-300 cursor-pointer"${adminTitle}>
+                <input type="checkbox" data-menu-role="Admin" value="${def.key}" ${adminChecked} class="accent-orange-500 cursor-pointer" />
                 Admin
               </label>
               <label class="role-menu-label-user ${def.adminOnly ? 'is-disabled text-slate-500' : 'text-sky-300'} flex items-center gap-1.5 text-[11px] font-semibold">
@@ -5158,8 +5243,14 @@
       const userMenus = Array.from(container.querySelectorAll('input[data-menu-role="User"]'))
         .filter(el => el.checked && !el.disabled)
         .map(el => el.value);
+      const adminMenus = Array.from(container.querySelectorAll('input[data-menu-role="Admin"]'))
+        .filter(el => el.checked)
+        .map(el => el.value);
+      // Anti-lockout: Admin wajib tetap punya Dashboard & Manajemen User.
+      const adminSet = new Set(adminMenus);
+      PULSE_ADMIN_REQUIRED_MENUS.forEach(key => adminSet.add(key));
       const roles = {
-        Admin: window.PULSE_MENU_DEFS.map(d => d.key),
+        Admin: Array.from(adminSet),
         User: userMenus
       };
       try {
@@ -5168,6 +5259,7 @@
         window.showToast('Hak akses menu per role berhasil disimpan.', 'success');
         const current = window.getCurrentSession();
         if (current) applyMenuVisibilityForRole(current.role);
+        await window.renderRoleMenuMatrix();
       } catch (error) {
         window.showToast(error.message || 'Gagal menyimpan hak akses menu.', 'error');
       }

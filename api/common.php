@@ -20,6 +20,9 @@ const PULSE_DEFAULT_ROLE_MENUS = [
     'User' => ['nav-dashboard', 'nav-grapari', 'action-export'],
 ];
 
+// Menu yang wajib selalu dimiliki role Admin agar tidak terkunci dari pengaturan.
+const PULSE_ADMIN_REQUIRED_MENUS = ['nav-dashboard', 'action-users'];
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('X-Content-Type-Options: nosniff');
@@ -373,14 +376,19 @@ function pulseGetRoleMenus(PDO $pdo): array
         error_log('Pulse role menus read: ' . $error->getMessage());
         return PULSE_DEFAULT_ROLE_MENUS;
     }
-    // Admin selalu memiliki seluruh menu agar tidak terkunci dari pengaturan.
-    $result['Admin'] = PULSE_MENU_KEYS;
+    // Anti-lockout: role Admin wajib tetap punya menu Dashboard & Manajemen User.
+    $adminMenus = is_array($result['Admin'] ?? null) ? $result['Admin'] : [];
+    $result['Admin'] = array_values(array_intersect(
+        PULSE_MENU_KEYS,
+        array_unique(array_merge($adminMenus, PULSE_ADMIN_REQUIRED_MENUS))
+    ));
     return $result;
 }
 
 /**
  * Simpan konfigurasi hak akses menu per role (hanya role yang dikenal).
- * Role Admin dipaksa penuh agar admin tidak dapat mengunci dirinya sendiri.
+ * Role Admin dapat diatur, namun menu Dashboard & Manajemen User selalu
+ * dipertahankan agar admin tidak terkunci dari pengaturan.
  */
 function pulseSaveRoleMenus(PDO $pdo, array $roles): array
 {
@@ -396,7 +404,11 @@ function pulseSaveRoleMenus(PDO $pdo, array $roles): array
             array_map('strval', $keys)
         ));
     }
-    $cleaned['Admin'] = PULSE_MENU_KEYS;
+    // Anti-lockout: role Admin wajib tetap punya menu Dashboard & Manajemen User.
+    $cleaned['Admin'] = array_values(array_intersect(
+        PULSE_MENU_KEYS,
+        array_unique(array_merge($cleaned['Admin'], PULSE_ADMIN_REQUIRED_MENUS))
+    ));
 
     $statement = $pdo->prepare(
         'INSERT INTO pulse_role_menus (role, menus) VALUES (:role, :menus)
