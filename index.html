@@ -953,6 +953,7 @@
           <p class="text-xs font-bold leading-tight truncate">Live Chat CHO</p>
           <p id="pulse-chat-status" class="text-[9px] text-white/85 leading-tight truncate">Menghubungkan...</p>
         </div>
+        <button type="button" id="pulse-chat-settings-btn" onclick="openChatSettings()" title="Pengaturan Chat" class="hidden w-6 h-6 rounded-md bg-white/15 hover:bg-white/30 items-center justify-center text-xs transition">⚙️</button>
         <button type="button" id="pulse-chat-mute-btn" onclick="toggleChatSound()" title="Bisukan suara" class="w-6 h-6 rounded-md bg-white/15 hover:bg-white/30 flex items-center justify-center text-xs transition">🔔</button>
         <button type="button" onclick="toggleChatWindow()" title="Tutup" class="w-6 h-6 rounded-md bg-white/15 hover:bg-white/30 flex items-center justify-center text-xs transition">✕</button>
       </div>
@@ -967,6 +968,8 @@
           <span id="pulse-chat-tab-users-badge" class="hidden ml-1 min-w-[15px] h-[15px] px-1 rounded-full bg-red-600 text-[9px] font-bold text-white inline-flex items-center justify-center align-middle">0</span>
         </button>
       </div>
+      <!-- Pemilih grup: pindah antar room grup pada tab Grup -->
+      <div id="pulse-chat-groups" class="hidden shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"></div>
       <div class="flex-1 min-h-0 flex flex-col bg-slate-50 dark:bg-slate-950/60">
         <!-- Daftar user aktif (badge nama, role, Site, unread DM) -->
         <div id="pulse-chat-users" class="hidden flex-1 overflow-y-auto p-2 space-y-1"></div>
@@ -996,6 +999,37 @@
       💬
       <span id="pulse-chat-badge" class="hidden absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 border-2 border-white dark:border-slate-900 text-[9px] font-bold text-white flex items-center justify-center">0</span>
     </button>
+  </div>
+
+  <!-- Modal Pengaturan Chat: buat / kelola grup (khusus Admin) -->
+  <div id="pulse-chat-settings-modal" class="hidden fixed inset-0 z-50 bg-slate-950/70 items-center justify-center p-4">
+    <div class="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl">
+      <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900 z-10">
+        <span class="text-sm">⚙️</span>
+        <p class="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">Pengaturan Grup Chat</p>
+        <button type="button" onclick="closeChatSettings()" title="Tutup" class="w-7 h-7 rounded-md bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs transition">✕</button>
+      </div>
+      <div class="p-4 space-y-4">
+        <div>
+          <p id="pulse-chat-group-form-title" class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Tambah Grup Baru</p>
+          <input id="pulse-chat-group-name" type="text" maxlength="40" placeholder="Nama grup (maks 40 karakter)" class="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[13px] text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-orange-500" />
+          <label class="mt-2 flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer">
+            <input id="pulse-chat-group-all" type="checkbox" class="accent-orange-500" onchange="toggleChatGroupAll()" />
+            Tambahkan semua user terdaftar sebagai anggota
+          </label>
+          <p class="mt-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">Anggota grup</p>
+          <div id="pulse-chat-group-members" class="mt-1 max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800"></div>
+          <div class="mt-3 flex items-center gap-2">
+            <button type="button" id="pulse-chat-group-save" onclick="saveChatGroup()" class="flex-1 px-3 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold transition disabled:opacity-50">Simpan Grup</button>
+            <button type="button" id="pulse-chat-group-reset" onclick="resetChatGroupForm()" class="hidden px-3 py-2 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold transition">Batal Edit</button>
+          </div>
+        </div>
+        <div>
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Daftar Grup</p>
+          <div id="pulse-chat-group-list" class="space-y-1"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- =====================================================================
@@ -5599,13 +5633,17 @@
       fetching: false,
       sending: false,
       muted: false,
-      tab: 'chat',          // 'chat' (percakapan grup/DM) | 'users' (daftar user aktif)
+      tab: 'chat',          // 'chat' (percakapan grup/DM) | 'users' (daftar user terdaftar)
       peer: '',             // username lawan bicara DM ('' = room grup)
-      room: 'group',        // kunci room aktif
-      convTitle: 'Grup',
+      groupId: 0,           // grup aktif (0 = Grup Umum)
+      room: 'group:0',      // kunci room aktif
+      convTitle: 'Grup Umum',
       roomLastId: {},       // kunci room -> id pesan terakhir (per percakapan)
-      unread: { group: 0, dms: {} },
-      presence: [],
+      unread: { groups: {}, dms: {} },
+      users: [],            // seluruh user terdaftar + indikator online
+      groups: [],           // daftar grup yang tersedia
+      canManageGroups: false,
+      editingGroupId: 0,
       mentionItems: [],
       mentionIndex: 0,
       pollTimer: null,
@@ -5613,10 +5651,19 @@
       serverOffset: 0
     };
 
-    /** Kunci room sisi klien: 'group' atau 'dm:<peer>'. */
-    function chatRoomKey(peer) {
+    /** Kunci room sisi klien: 'group:<id>' atau 'dm:<peer>'. */
+    function chatRoomKey(peer, groupId) {
       const p = String(peer || '');
-      return p ? ('dm:' + p) : 'group';
+      if (p) return 'dm:' + p;
+      return 'group:' + (Number(groupId) || 0);
+    }
+    function chatCurrentGroup() {
+      const gid = Number(pulseChatState.groupId) || 0;
+      return (pulseChatState.groups || []).find((g) => Number(g.id) === gid) || null;
+    }
+    function chatCurrentGroupName() {
+      const group = chatCurrentGroup();
+      return group ? group.name : 'Grup Umum';
     }
 
     // Waktu "server" agar batas 2 menit tidak terpengaruh jam perangkat user.
@@ -5770,19 +5817,27 @@
       const dms = pulseChatState.unread.dms || {};
       return Object.keys(dms).reduce((sum, key) => sum + (Number(dms[key]) || 0), 0);
     }
+    function chatGroupUnread() {
+      const groups = pulseChatState.unread.groups || {};
+      return Object.keys(groups).reduce((sum, key) => sum + (Number(groups[key]) || 0), 0);
+    }
+    function chatCurrentGroupUnread() {
+      const groups = pulseChatState.unread.groups || {};
+      return Number(groups[pulseChatState.groupId]) || 0;
+    }
     /** Badge unread pada tombol chat, tab, dan item user DM. */
     function updateChatBadges() {
-      const total = (Number(pulseChatState.unread.group) || 0) + chatDmUnread();
+      const total = chatGroupUnread() + chatDmUnread();
       setMiniBadge(document.getElementById('pulse-chat-badge'), pulseChatState.open ? 0 : total);
       const currentUnread = pulseChatState.peer
         ? (Number((pulseChatState.unread.dms || {})[pulseChatState.peer]) || 0)
-        : (Number(pulseChatState.unread.group) || 0);
+        : chatCurrentGroupUnread();
       setMiniBadge(document.getElementById('pulse-chat-tab-chat-badge'), currentUnread);
       setMiniBadge(document.getElementById('pulse-chat-tab-users-badge'), chatDmUnread());
       const label = document.getElementById('pulse-chat-tab-chat-label');
       if (label) label.textContent = pulseChatState.peer ? 'Chat' : 'Grup';
       const usersTab = document.getElementById('pulse-chat-tab-users');
-      if (usersTab) usersTab.title = `${(pulseChatState.presence || []).length} user aktif`;
+      if (usersTab) usersTab.title = `${(pulseChatState.users || []).length} user terdaftar`;
     }
     function chatInitials(name) {
       const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
@@ -5791,24 +5846,27 @@
       return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
     function chatPeerSubtitle(peer) {
-      const found = (pulseChatState.presence || []).find((u) => u.username === peer);
-      return found ? `${found.role || 'User'} · ${chatSiteLabel(found.site)}` : 'Tidak sedang aktif';
+      const found = (pulseChatState.users || []).find((u) => u.username === peer);
+      if (!found) return 'Tidak terdaftar';
+      const status = found.online ? 'Online' : 'Offline';
+      return `${status} · ${found.role || 'User'} · ${chatSiteLabel(found.site)}`;
     }
-    /** Render daftar user aktif (nama, role, Site + badge unread DM). */
+    /** Render seluruh user terdaftar (online lebih dulu) + indikator status & badge unread DM. */
     function renderChatUsers() {
       const box = document.getElementById('pulse-chat-users');
       if (!box) return;
-      const users = pulseChatState.presence || [];
+      const users = pulseChatState.users || [];
       box.innerHTML = '';
       if (!users.length) {
         const empty = document.createElement('p');
         empty.className = 'text-center text-[10px] text-slate-400 dark:text-slate-500 py-6';
-        empty.textContent = 'Belum ada user aktif lain saat ini.';
+        empty.textContent = 'Belum ada user terdaftar lain.';
         box.appendChild(empty);
         return;
       }
       users.forEach((user) => {
         const unread = Number((pulseChatState.unread.dms || {})[user.username]) || 0;
+        const online = Boolean(user.online);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800/70 text-left transition';
@@ -5818,7 +5876,9 @@
         av.className = 'w-7 h-7 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-white text-[10px] font-bold flex items-center justify-center';
         av.textContent = chatInitials(user.full_name || user.username);
         const dot = document.createElement('span');
-        dot.className = 'absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900';
+        // Titik hijau = online (last_seen <= beberapa menit), abu-abu = offline.
+        dot.className = 'absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ' + (online ? 'bg-emerald-500' : 'bg-slate-400 dark:bg-slate-600');
+        dot.title = online ? 'Online' : 'Offline';
         avWrap.appendChild(av);
         avWrap.appendChild(dot);
         const info = document.createElement('span');
@@ -5827,8 +5887,8 @@
         name.className = 'block text-[11px] font-semibold text-slate-700 dark:text-slate-100 truncate';
         name.textContent = user.full_name || user.username;
         const sub = document.createElement('span');
-        sub.className = 'block text-[9px] text-slate-400 dark:text-slate-500 truncate';
-        sub.textContent = `${user.role || 'User'} · ${chatSiteLabel(user.site)}`;
+        sub.className = 'block text-[9px] truncate ' + (online ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500');
+        sub.textContent = `${online ? 'Online' : 'Offline'} · ${user.role || 'User'} · ${chatSiteLabel(user.site)}`;
         info.appendChild(name);
         info.appendChild(sub);
         btn.appendChild(avWrap);
@@ -5842,6 +5902,37 @@
         btn.addEventListener('click', () => openChatDm(user.username, user.full_name || user.username));
         box.appendChild(btn);
       });
+    }
+    /** Render pemilih grup (pindah antar room grup) pada tab Grup. */
+    function renderChatGroups() {
+      const bar = document.getElementById('pulse-chat-groups');
+      if (!bar) return;
+      const groups = pulseChatState.groups || [];
+      const show = pulseChatState.tab === 'chat' && !pulseChatState.peer && groups.length > 0;
+      bar.classList.toggle('hidden', !show);
+      bar.classList.toggle('flex', show);
+      if (!show) return;
+      bar.innerHTML = '';
+      groups.forEach((group) => {
+        const unread = Number((pulseChatState.unread.groups || {})[group.id]) || 0;
+        const active = Number(pulseChatState.groupId) === Number(group.id);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'shrink-0 px-2.5 py-1 rounded-full text-[10px] font-semibold border transition ' + (active
+          ? 'bg-orange-500 text-white border-orange-500'
+          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-orange-400');
+        btn.textContent = group.name + (unread > 0 ? ' (' + unread + ')' : '');
+        btn.title = group.is_general ? 'Grup Umum (semua user)' : `${group.member_count || 0} anggota`;
+        btn.addEventListener('click', () => selectChatGroup(group.id, group.name));
+        bar.appendChild(btn);
+      });
+    }
+    /** Tampilkan tombol gear hanya bila user berhak mengelola grup (Admin). */
+    function updateChatSettingsButton() {
+      const btn = document.getElementById('pulse-chat-settings-btn');
+      if (!btn) return;
+      btn.classList.toggle('hidden', !pulseChatState.canManageGroups);
+      btn.classList.toggle('flex', Boolean(pulseChatState.canManageGroups));
     }
     /** Susun tampilan tab aktif (percakapan vs daftar user). */
     function renderChatLayout() {
@@ -5857,12 +5948,14 @@
         head.classList.toggle('flex', showHead);
       }
       const title = document.getElementById('pulse-chat-conv-title');
-      if (title) title.textContent = pulseChatState.peer ? ('DM · ' + (pulseChatState.convTitle || pulseChatState.peer)) : 'Grup';
+      if (title) title.textContent = pulseChatState.peer ? ('DM · ' + (pulseChatState.convTitle || pulseChatState.peer)) : chatCurrentGroupName();
       const sub = document.getElementById('pulse-chat-conv-sub');
       if (sub) sub.textContent = pulseChatState.peer ? chatPeerSubtitle(pulseChatState.peer) : '';
       setChatTabStyle(document.getElementById('pulse-chat-tab-chat'), isChat);
       setChatTabStyle(document.getElementById('pulse-chat-tab-users'), !isChat);
+      updateChatSettingsButton();
       updateChatBadges();
+      renderChatGroups();
       if (isChat) scrollChatToBottom();
       else renderChatUsers();
     }
@@ -5871,12 +5964,15 @@
       if (listEl) listEl.innerHTML = '';
       showChatEmptyHint();
     }
-    /** Pindah room: '' = grup, selain itu DM ke user tersebut. */
-    function openChatRoom(peer, title) {
+    /** Pindah room: peer '' = grup (groupId), selain itu DM ke user tersebut. */
+    function openChatRoom(peer, title, groupId) {
       const target = String(peer || '');
       pulseChatState.peer = target;
-      pulseChatState.room = chatRoomKey(target);
-      pulseChatState.convTitle = target ? (title || target) : 'Grup';
+      if (!target && groupId !== undefined && groupId !== null) {
+        pulseChatState.groupId = Number(groupId) || 0;
+      }
+      pulseChatState.room = chatRoomKey(target, pulseChatState.groupId);
+      pulseChatState.convTitle = target ? (title || target) : (title || chatCurrentGroupName());
       pulseChatState.tab = 'chat';
       pulseChatState.roomLastId[pulseChatState.room] = 0; // muat ulang riwayat room ini
       renderChatLayout();
@@ -5888,8 +5984,11 @@
     window.openChatDm = function openChatDm(peer, title) {
       openChatRoom(peer, title);
     };
+    window.selectChatGroup = function selectChatGroup(groupId, name) {
+      openChatRoom('', name, groupId);
+    };
     window.backToGroupChat = function backToGroupChat() {
-      openChatRoom('', 'Grup');
+      openChatRoom('', chatCurrentGroupName(), pulseChatState.groupId);
     };
     window.switchChatTab = function switchChatTab(tab) {
       pulseChatState.tab = tab === 'users' ? 'users' : 'chat';
@@ -5935,7 +6034,7 @@
         return;
       }
       const q = ctx.token.toLowerCase();
-      const items = (pulseChatState.presence || []).filter((user) => {
+      const items = (pulseChatState.users || []).filter((user) => {
         if (!q) return true;
         return String(user.username).toLowerCase().includes(q) || String(user.full_name || '').toLowerCase().includes(q);
       }).slice(0, 6);
@@ -6125,7 +6224,7 @@
         }
         syncChatServerTime(data);
         if (action === 'edit' && data.message) updateChatMessageInDom(data.message);
-        return true;
+        return data;
       } catch (e) {
         window.showToast('Aksi pesan gagal. Periksa koneksi.', 'error');
         return false;
@@ -6203,6 +6302,182 @@
       if (ok) removeChatMessageFromDom(id);
     }
 
+    // ---------- Pengaturan grup (khusus Admin) ----------
+    function toggleChatGroupAll() {
+      const allEl = document.getElementById('pulse-chat-group-all');
+      const checked = Boolean(allEl && allEl.checked);
+      document.querySelectorAll('#pulse-chat-group-members input[type="checkbox"]').forEach((cb) => {
+        cb.disabled = checked;
+        if (checked) cb.checked = true;
+      });
+    }
+    /** Daftar centang anggota dari seluruh user terdaftar. */
+    function renderChatGroupMemberPicker(selected) {
+      const box = document.getElementById('pulse-chat-group-members');
+      if (!box) return;
+      const users = pulseChatState.users || [];
+      const chosen = new Set((selected || []).map((name) => String(name)));
+      box.innerHTML = '';
+      if (!users.length) {
+        const empty = document.createElement('p');
+        empty.className = 'px-2 py-2 text-[10px] text-slate-400 dark:text-slate-500';
+        empty.textContent = 'Belum ada user terdaftar.';
+        box.appendChild(empty);
+        return;
+      }
+      users.forEach((user) => {
+        const label = document.createElement('label');
+        label.className = 'flex items-center gap-2 px-2 py-1.5 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = user.username;
+        cb.checked = chosen.has(String(user.username));
+        cb.className = 'accent-orange-500';
+        const name = document.createElement('span');
+        name.className = 'truncate';
+        name.textContent = (user.full_name || user.username) + ' (' + user.username + ')';
+        label.appendChild(cb);
+        label.appendChild(name);
+        box.appendChild(label);
+      });
+    }
+    function renderChatGroupList() {
+      const box = document.getElementById('pulse-chat-group-list');
+      if (!box) return;
+      const groups = (pulseChatState.groups || []).filter((g) => !g.is_general);
+      box.innerHTML = '';
+      if (!groups.length) {
+        const empty = document.createElement('p');
+        empty.className = 'text-[10px] text-slate-400 dark:text-slate-500 py-2';
+        empty.textContent = 'Belum ada grup tambahan.';
+        box.appendChild(empty);
+        return;
+      }
+      groups.forEach((group) => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800';
+        const info = document.createElement('div');
+        info.className = 'min-w-0 flex-1';
+        const name = document.createElement('p');
+        name.className = 'text-[11px] font-semibold text-slate-700 dark:text-slate-100 truncate';
+        name.textContent = group.name;
+        const sub = document.createElement('p');
+        sub.className = 'text-[9px] text-slate-400 dark:text-slate-500';
+        sub.textContent = `${group.member_count || 0} anggota`;
+        info.appendChild(name);
+        info.appendChild(sub);
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'shrink-0 px-2 py-1 rounded-md text-[10px] text-orange-600 dark:text-orange-400 hover:bg-orange-500/10 transition';
+        editBtn.textContent = 'Edit';
+        editBtn.addEventListener('click', () => editChatGroup(group.id));
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'shrink-0 px-2 py-1 rounded-md text-[10px] text-red-600 dark:text-red-400 hover:bg-red-500/10 transition';
+        delBtn.textContent = 'Hapus';
+        delBtn.addEventListener('click', () => deleteChatGroup(group.id, group.name));
+        row.appendChild(info);
+        row.appendChild(editBtn);
+        row.appendChild(delBtn);
+        box.appendChild(row);
+      });
+    }
+    function resetChatGroupForm() {
+      pulseChatState.editingGroupId = 0;
+      const nameInput = document.getElementById('pulse-chat-group-name');
+      if (nameInput) nameInput.value = '';
+      const all = document.getElementById('pulse-chat-group-all');
+      if (all) all.checked = false;
+      const title = document.getElementById('pulse-chat-group-form-title');
+      if (title) title.textContent = 'Tambah Grup Baru';
+      const reset = document.getElementById('pulse-chat-group-reset');
+      if (reset) reset.classList.add('hidden');
+      const save = document.getElementById('pulse-chat-group-save');
+      if (save) save.textContent = 'Simpan Grup';
+      renderChatGroupMemberPicker([]);
+      toggleChatGroupAll();
+    }
+    function editChatGroup(groupId) {
+      const group = (pulseChatState.groups || []).find((g) => Number(g.id) === Number(groupId));
+      if (!group) return;
+      pulseChatState.editingGroupId = Number(groupId);
+      const nameInput = document.getElementById('pulse-chat-group-name');
+      if (nameInput) nameInput.value = group.name || '';
+      const all = document.getElementById('pulse-chat-group-all');
+      if (all) all.checked = false;
+      const title = document.getElementById('pulse-chat-group-form-title');
+      if (title) title.textContent = 'Ubah Grup: ' + (group.name || '');
+      const reset = document.getElementById('pulse-chat-group-reset');
+      if (reset) reset.classList.remove('hidden');
+      const save = document.getElementById('pulse-chat-group-save');
+      if (save) save.textContent = 'Simpan Perubahan';
+      renderChatGroupMemberPicker(group.members || []);
+      toggleChatGroupAll();
+      if (nameInput) nameInput.focus();
+    }
+    async function saveChatGroup() {
+      const nameInput = document.getElementById('pulse-chat-group-name');
+      const name = (nameInput ? nameInput.value : '').trim();
+      if (!name) {
+        window.showToast('Nama grup wajib diisi.', 'error');
+        return;
+      }
+      const allEl = document.getElementById('pulse-chat-group-all');
+      const all = Boolean(allEl && allEl.checked);
+      const payload = { name: name, all: all };
+      if (!all) {
+        const members = [];
+        document.querySelectorAll('#pulse-chat-group-members input[type="checkbox"]:checked').forEach((cb) => members.push(cb.value));
+        payload.members = members;
+      }
+      const editing = Number(pulseChatState.editingGroupId) || 0;
+      if (editing > 0) payload.group_id = editing;
+      const saveBtn = document.getElementById('pulse-chat-group-save');
+      if (saveBtn) saveBtn.disabled = true;
+      const data = await submitChatAction(editing > 0 ? 'group_update' : 'group_create', payload);
+      if (saveBtn) saveBtn.disabled = false;
+      if (!data) return;
+      window.showToast(editing > 0 ? 'Grup berhasil diperbarui.' : 'Grup baru berhasil dibuat.', 'success');
+      resetChatGroupForm();
+      await fetchChatMessages();
+      renderChatGroupList();
+      renderChatGroups();
+    }
+    async function deleteChatGroup(groupId, name) {
+      if (!window.confirm('Hapus grup "' + (name || '') + '"? Seluruh pesan grup ini akan dihapus.')) return;
+      const data = await submitChatAction('group_delete', { group_id: Number(groupId) });
+      if (!data) return;
+      window.showToast('Grup berhasil dihapus.', 'success');
+      if (Number(pulseChatState.groupId) === Number(groupId)) {
+        openChatRoom('', 'Grup Umum', 0);
+      }
+      resetChatGroupForm();
+      await fetchChatMessages();
+      renderChatGroupList();
+      renderChatGroups();
+    }
+    window.openChatSettings = function openChatSettings() {
+      if (!pulseChatState.canManageGroups) {
+        window.showToast('Hanya Admin yang dapat mengelola grup chat.', 'error');
+        return;
+      }
+      const modal = document.getElementById('pulse-chat-settings-modal');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      resetChatGroupForm();
+      renderChatGroupList();
+    };
+    window.closeChatSettings = function closeChatSettings() {
+      const modal = document.getElementById('pulse-chat-settings-modal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    };
+    window.resetChatGroupForm = resetChatGroupForm;
+    window.toggleChatGroupAll = toggleChatGroupAll;
+    window.saveChatGroup = saveChatGroup;
+
     // ---------- Ambil & render pesan ----------
     async function fetchChatMessages() {
       if (!pulseChatState.active || pulseChatState.fetching) return;
@@ -6217,6 +6492,7 @@
         const params = new URLSearchParams();
         if (!isInitial) params.set('after_id', String(lastId));
         if (peer) params.set('peer', peer);
+        else params.set('group', String(pulseChatState.groupId || 0));
         // Tandai sudah dibaca hanya saat room ini benar-benar sedang ditampilkan.
         if (pulseChatState.open && pulseChatState.tab === 'chat') params.set('read', '1');
         const query = params.toString();
@@ -6287,15 +6563,19 @@
 
       if (!listEl.querySelector('[data-chat-id]')) showChatEmptyHint();
 
-      // 4) Perbarui presence user aktif + counter unread dari server.
-      if (Array.isArray(data.presence)) pulseChatState.presence = data.presence;
+      // 4) Perbarui daftar user/grup + counter unread dari server.
+      if (Array.isArray(data.users)) pulseChatState.users = data.users;
+      if (Array.isArray(data.groups)) pulseChatState.groups = data.groups;
+      if (typeof data.can_manage_groups === 'boolean') pulseChatState.canManageGroups = data.can_manage_groups;
       if (data.unread && typeof data.unread === 'object') {
         pulseChatState.unread = {
-          group: Number(data.unread.group) || 0,
+          groups: (data.unread.groups && typeof data.unread.groups === 'object') ? data.unread.groups : {},
           dms: (data.unread.dms && typeof data.unread.dms === 'object') ? data.unread.dms : {}
         };
       }
+      updateChatSettingsButton();
       updateChatBadges();
+      renderChatGroups();
       if (pulseChatState.tab === 'users') renderChatUsers();
       else if (pulseChatState.peer) {
         const sub = document.getElementById('pulse-chat-conv-sub');
@@ -6339,13 +6619,17 @@
         }
         const data = await res.json().catch(() => ({}));
         syncChatServerTime(data);
-        if (Array.isArray(data.presence)) pulseChatState.presence = data.presence;
+        if (Array.isArray(data.users)) pulseChatState.users = data.users;
+        if (Array.isArray(data.groups)) pulseChatState.groups = data.groups;
+        if (typeof data.can_manage_groups === 'boolean') pulseChatState.canManageGroups = data.can_manage_groups;
         if (data.unread && typeof data.unread === 'object') {
           pulseChatState.unread = {
-            group: Number(data.unread.group) || 0,
+            groups: (data.unread.groups && typeof data.unread.groups === 'object') ? data.unread.groups : {},
             dms: (data.unread.dms && typeof data.unread.dms === 'object') ? data.unread.dms : {}
           };
         }
+        updateChatSettingsButton();
+        renderChatGroups();
         if (pulseChatState.tab === 'users') renderChatUsers();
         updateChatBadges();
       } catch (e) {}
@@ -6408,7 +6692,7 @@
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'send', message: text, peer: pulseChatState.peer })
+          body: JSON.stringify({ action: 'send', message: text, peer: pulseChatState.peer, group: pulseChatState.peer ? 0 : (Number(pulseChatState.groupId) || 0) })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -6452,11 +6736,15 @@
       pulseChatState.active = true;
       pulseChatState.tab = 'chat';
       pulseChatState.peer = '';
-      pulseChatState.room = 'group';
-      pulseChatState.convTitle = 'Grup';
+      pulseChatState.groupId = 0;
+      pulseChatState.room = 'group:0';
+      pulseChatState.convTitle = 'Grup Umum';
       pulseChatState.roomLastId = {};
-      pulseChatState.unread = { group: 0, dms: {} };
-      pulseChatState.presence = [];
+      pulseChatState.unread = { groups: {}, dms: {} };
+      pulseChatState.users = [];
+      pulseChatState.groups = [];
+      pulseChatState.canManageGroups = false;
+      pulseChatState.editingGroupId = 0;
       const listEl = document.getElementById('pulse-chat-messages');
       if (listEl) listEl.innerHTML = '';
       showChatEmptyHint();
@@ -6474,13 +6762,18 @@
       pulseChatState.open = false;
       pulseChatState.tab = 'chat';
       pulseChatState.peer = '';
-      pulseChatState.room = 'group';
+      pulseChatState.groupId = 0;
+      pulseChatState.room = 'group:0';
       pulseChatState.roomLastId = {};
-      pulseChatState.unread = { group: 0, dms: {} };
-      pulseChatState.presence = [];
+      pulseChatState.unread = { groups: {}, dms: {} };
+      pulseChatState.users = [];
+      pulseChatState.groups = [];
+      pulseChatState.canManageGroups = false;
+      pulseChatState.editingGroupId = 0;
       stopChatPolling();
       stopChatHeartbeat();
       hideMentionSuggest();
+      window.closeChatSettings();
       const panel = document.getElementById('pulse-chat-panel');
       if (panel) {
         panel.classList.add('hidden');
