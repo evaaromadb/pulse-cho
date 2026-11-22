@@ -668,6 +668,17 @@
       line-height: 1.25 !important;
       font-family: var(--pulse-chat-font-family) !important;
     }
+    /* Revisi UI: Nama/Badge pengirim + metadata lokasi & tanggal/jam (WIB) pada SETIAP
+       item pesan dikunci tetap 6px dan TIDAK ikut berubah saat user mengubah ukuran font
+       chat (specificity lebih tinggi dari aturan var di atas, jadi selalu menang).
+       Warna identitas badge (--pc-user-*), line-height rapi, dan ellipsis tetap dijaga. */
+    #pulse-chat-panel .pulse-chat-meta,
+    #pulse-chat-panel .pulse-chat-meta *,
+    #pulse-chat-panel .pulse-chat-name,
+    #pulse-chat-panel .pulse-chat-meta-rest {
+      font-size: 6px !important;
+      line-height: 1.3 !important;
+    }
     #pulse-chat-panel *,
     #pulse-chat-panel textarea,
     #pulse-chat-panel input {
