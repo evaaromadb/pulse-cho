@@ -462,7 +462,9 @@
         });
         if (errBox) errBox.classList.add('hidden');
         window.applyAuthenticatedSession(response.user, false);
-        window.location.reload();
+        if (typeof window.completeLoginNavigation === 'function') {
+          await window.completeLoginNavigation();
+        }
       } catch (error) {
         if (errBox) {
           errBox.textContent = error.message || 'Login gagal. Periksa koneksi dan kredensial.';
@@ -1961,15 +1963,61 @@
      * Return { rows: [] | null, version, rowCount, savedBy, savedAt }
      */
     async function readPulseDatasetFromCloud({ metaOnly = false } = {}) {
-      const record = await pulseCloudRequest(metaOnly ? '?metaOnly=1' : '');
+      const record = await pulseCloudRequest(metaOnly ? '?metaOnly=1' : '?index=1');
       if (!record || !record.exists) return { rows: null, version: null, rowCount: 0, savedBy: null, savedAt: null };
-      return {
-        rows: !metaOnly && Array.isArray(record.rows) ? record.rows : (metaOnly ? null : []),
+      const base = {
         version: `${record.saved_at || ''}|${record.row_count || 0}`,
         rowCount: Number(record.row_count || 0),
         savedBy: record.saved_by || null,
         savedAt: record.saved_at || null
       };
+      if (metaOnly) return Object.assign({ rows: null }, base);
+      if (Array.isArray(record.rows)) return Object.assign({ rows: record.rows }, base);
+      if (Array.isArray(record.chunks) && record.chunks.length > 0) {
+        const rows = await downloadPulseDatasetChunks(record.version, record.chunks, base.rowCount);
+        return Object.assign({ rows }, base);
+      }
+      return Object.assign({ rows: [] }, base);
+    }
+
+    /**
+     * Unduh isi dataset per chunk secara paralel (default 6 permintaan sekaligus).
+     * TiDB butuh ~1 detik per chunk; paralel membuat dataset 123 chunk selesai
+     * dalam hitungan detik, bukan menit.
+     */
+    async function downloadPulseDatasetChunks(version, chunks, expectedRows) {
+      const queue = chunks.slice();
+      const results = new Array(chunks.length);
+      let loadedRows = 0;
+      const total = expectedRows || chunks.reduce((n, c) => n + (c.row_count || 0), 0);
+
+      const worker = async () => {
+        while (queue.length > 0) {
+          const chunk = queue.shift();
+          const url = `?version=${encodeURIComponent(version)}&chunk=${encodeURIComponent(chunk.index)}`;
+          const part = await pulseCloudRequest(url);
+          results[chunk.index] = Array.isArray(part) ? part : [];
+          loadedRows += results[chunk.index].length;
+          if (isPulseCloudEnabled()) {
+            const el = document.getElementById('upload-status-badge');
+            if (el) {
+              el.textContent = `Memuat dataset dari TiDB... ${loadedRows.toLocaleString('id-ID')} / ${total.toLocaleString('id-ID')} baris`;
+            }
+          }
+        }
+      };
+
+      const workers = [];
+      for (let i = 0; i < Math.min(10, chunks.length); i++) workers.push(worker());
+      await Promise.all(workers);
+
+      const rows = [];
+      for (let i = 0; i < results.length; i++) {
+        if (results[i] && results[i].length > 0) {
+          for (let j = 0; j < results[i].length; j++) rows.push(results[i][j]);
+        }
+      }
+      return rows;
     }
 
     /**
@@ -2210,6 +2258,11 @@
     async function loadActiveDataset() {
       let cloudError = null;
       if (isPulseCloudEnabled()) {
+        setPulseSyncBadge('☁ Memuat data...', 'sky');
+        const badgeEl = document.getElementById('upload-status-badge');
+        if (badgeEl && rawUploadedRows.length === 0) {
+          badgeEl.textContent = 'Memuat dataset dari TiDB...';
+        }
         try {
           const cloud = await readPulseDatasetFromCloud({ metaOnly: false });
           pulseCloudLastVersion = cloud.version;
@@ -2218,8 +2271,9 @@
           pulseCloudLastVersionUpdated = true;
           updateCloudSyncBadge();
           if (Array.isArray(cloud.rows)) {
-            if (cloud.rows.length > 0) await saveUploadedRowsToDb(cloud.rows);
-            else await clearUploadedRowsFromDb();
+            // Cache lokal hanya untuk mode offline, jadi tidak ditunggu di jalur kritis
+            if (cloud.rows.length > 0) saveUploadedRowsToDb(cloud.rows);
+            else clearUploadedRowsFromDb();
             return cloud.rows;
           }
           return [];
@@ -4452,6 +4506,25 @@
       // Pantau perubahan dataset oleh admin lain (polling ringan + saat tab kembali aktif)
       if (authenticated) startCloudDatasetPolling();
     }
+
+    // Dipanggil setelah login sukses tanpa reload halaman
+    window.completeLoginNavigation = async function completeLoginNavigation() {
+      const gate = document.getElementById('login-gate');
+      if (gate) gate.classList.add('hidden');
+      const errBox = document.getElementById('login-error-box');
+      if (errBox) errBox.classList.add('hidden');
+      try {
+        const rows = await loadActiveDataset();
+        ingestAndFilterData(rows || []);
+        if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
+          window.applyDatePreset('ALL_UPLOADED', false);
+        }
+      } catch (error) {
+        console.warn('Gagal memuat dataset setelah login:', error);
+        ingestAndFilterData([]);
+      }
+      startCloudDatasetPolling();
+    };
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initPulseChoApp);

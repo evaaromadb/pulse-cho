@@ -5,11 +5,81 @@ require __DIR__ . '/common.php';
 
 const PULSE_MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 const PULSE_DB_CHUNK_BYTES = 1024 * 1024;
+const PULSE_CLIENT_CHUNK_ROWS = 2000;
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 if (!in_array($method, ['GET', 'PUT', 'DELETE'], true)) {
     header('Allow: GET, PUT, DELETE');
     pulseRespond(['error' => 'Metode request tidak didukung.'], 405);
+}
+
+/**
+ * Kirim potongan JSON mentah ke browser tanpa membungkusnya di memori.
+ * Dipakai untuk respons besar (dataset penuh / satu chunk).
+ */
+function pulseStreamStart(): void
+{
+    @ini_set('zlib.output_compression', '0');
+    @ini_set('output_buffering', '0');
+    @set_time_limit(900);
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Content-Encoding: identity');
+    header('X-Accel-Buffering: no');
+}
+
+function pulseActiveDatasetMeta(PDO $pdo): ?array
+{
+    // Query di-cache sebentar: dipanggil di awal setiap request (termasuk tiap
+    // chunk download paralel), jadi menghindari round-trip TiDB berulang.
+    static $cachedAt = null;
+    static $cached = null;
+    if ($cachedAt !== null && (microtime(true) - $cachedAt) < 1.0) {
+        return $cached;
+    }
+    $statement = $pdo->prepare(
+        "SELECT row_count, saved_by, active_version,
+                DATE_FORMAT(saved_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS saved_at
+         FROM pulse_dataset
+         WHERE dataset_key = :dataset_key
+         LIMIT 1"
+    );
+    $statement->execute(['dataset_key' => 'active_dataset_v1']);
+    $record = $statement->fetch();
+    $cachedAt = microtime(true);
+    $cached = $record ?: null;
+    return $cached;
+}
+
+function pulseChunkIndexRows(PDO $pdo, string $versionId): array
+{
+    if ($versionId === '') {
+        return [];
+    }
+    static $cache = [];
+    if (isset($cache[$versionId])) {
+        return $cache[$versionId];
+    }
+    $statement = $pdo->prepare(
+        'SELECT chunk_index, row_count, byte_length
+         FROM pulse_dataset_chunk_index
+         WHERE dataset_key = :dataset_key AND version_id = :version_id
+         ORDER BY chunk_index'
+    );
+    $statement->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $versionId]);
+    $chunks = [];
+    foreach ($statement->fetchAll() as $row) {
+        $chunks[] = [
+            'index' => (int) $row['chunk_index'],
+            'row_count' => (int) $row['row_count'],
+            'byte_length' => (int) $row['byte_length'],
+        ];
+    }
+    $cache[$versionId] = $chunks;
+    return $chunks;
 }
 
 try {
@@ -21,15 +91,7 @@ try {
     }
 
     if ($method === 'GET') {
-        $statement = $pdo->prepare(
-            "SELECT `rows`, row_count, saved_by, active_version,
-                    DATE_FORMAT(saved_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS saved_at
-             FROM pulse_dataset
-             WHERE dataset_key = :dataset_key
-             LIMIT 1"
-        );
-        $statement->execute(['dataset_key' => 'active_dataset_v1']);
-        $record = $statement->fetch();
+        $record = pulseActiveDatasetMeta($pdo);
         if (!$record) {
             pulseRespond([
                 'exists' => false,
@@ -37,42 +99,95 @@ try {
                 'row_count' => 0,
                 'saved_by' => null,
                 'saved_at' => null,
+                'chunks' => [],
             ]);
         }
 
+        $activeVersion = (string) ($record['active_version'] ?? '');
+        $chunks = pulseChunkIndexRows($pdo, $activeVersion);
         $metaOnly = ($_GET['metaOnly'] ?? '') === '1';
-        $rows = null;
-        if (!$metaOnly && !empty($record['active_version'])) {
-            $chunkStatement = $pdo->prepare(
+        $wantsIndex = ($_GET['index'] ?? '') === '1';
+
+        // Mode per-chunk: browser mengunduh beberapa chunk paralel.
+        $chunkParam = $_GET['chunk'] ?? null;
+        if ($chunkParam !== null && !$metaOnly) {
+            $chunkIndex = (int) $chunkParam;
+            $versionParam = (string) ($_GET['version'] ?? $activeVersion);
+            if ($versionParam === '' || $chunkIndex < 0) {
+                pulseRespond(['error' => 'Parameter chunk tidak valid.'], 400);
+            }
+            $statement = $pdo->prepare(
+                'SELECT `rows` FROM pulse_dataset_chunks
+                 WHERE dataset_key = :dataset_key AND version_id = :version_id AND chunk_index = :chunk_index'
+            );
+            $statement->execute([
+                'dataset_key' => 'active_dataset_v1',
+                'version_id' => $versionParam,
+                'chunk_index' => $chunkIndex,
+            ]);
+            $raw = $statement->fetchColumn();
+            if ($raw === false) {
+                pulseRespond(['error' => 'Chunk dataset tidak ditemukan.'], 404);
+            }
+            // Versi ini dipakai ulang; browser boleh menyimpannya sebentar supaya
+            // reload berikutnya tidak perlu mengunduh ulang data yang sama.
+            pulseStreamStart();
+            header('Cache-Control: private, max-age=600');
+            header('ETag: "' . $versionParam . '-' . $chunkIndex . '"');
+            echo trim((string) $raw);
+            exit;
+        }
+
+        $payload = [
+            'exists' => true,
+            'row_count' => (int) $record['row_count'],
+            'saved_by' => $record['saved_by'],
+            'saved_at' => $record['saved_at'],
+        ];
+
+        if ($metaOnly) {
+            pulseRespond($payload + ['rows' => null]);
+        }
+
+        if (!$wantsIndex && $chunks === []) {
+            // Dataset lama (belum punya index chunk): kirim utuh, streaming per chunk.
+            pulseStreamStart();
+            $prefix = json_encode($payload + ['chunks' => []], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            echo substr($prefix, 0, -1) . ',"rows":[';
+            flush();
+            $statement = $pdo->prepare(
                 'SELECT `rows` FROM pulse_dataset_chunks
                  WHERE dataset_key = :dataset_key AND version_id = :version_id
                  ORDER BY chunk_index'
             );
-            $chunkStatement->execute([
-                'dataset_key' => 'active_dataset_v1',
-                'version_id' => $record['active_version'],
-            ]);
-            $rows = [];
-            while ($chunk = $chunkStatement->fetch()) {
-                $chunkRows = json_decode((string) $chunk['rows'], true);
-                if (!is_array($chunkRows)) {
+            $statement->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $activeVersion]);
+            $first = true;
+            unset($record);
+            while ($chunk = $statement->fetch(PDO::FETCH_NUM)) {
+                $chunkJson = trim((string) $chunk[0]);
+                if ($chunkJson === '' || $chunkJson === '[]') {
+                    continue;
+                }
+                if ($chunkJson[0] !== '[' || substr($chunkJson, -1) !== ']') {
                     throw new RuntimeException('Format chunk dataset di TiDB tidak valid.');
                 }
-                array_push($rows, ...$chunkRows);
+                echo ($first ? '' : ',') . substr($chunkJson, 1, -1);
+                $first = false;
+                flush();
+                if (connection_aborted()) {
+                    exit;
+                }
             }
-        } elseif (!$metaOnly) {
-            $rows = json_decode((string) $record['rows'], true);
-            if (!is_array($rows)) {
-                throw new RuntimeException('Format dataset di TiDB tidak valid.');
-            }
+            echo ']}';
+            exit;
         }
 
-        pulseRespond([
-            'exists' => true,
-            'rows' => $rows,
-            'row_count' => (int) $record['row_count'],
-            'saved_by' => $record['saved_by'],
-            'saved_at' => $record['saved_at'],
+        // Mode index: cukup metadata + daftar chunk.
+        pulseRespond($payload + [
+            'rows' => null,
+            'version' => $activeVersion,
+            'chunk_rows' => PULSE_CLIENT_CHUNK_ROWS,
+            'chunks' => $chunks,
         ]);
     }
 
@@ -105,6 +220,12 @@ try {
                (dataset_key, version_id, chunk_index, `rows`, row_count)
              VALUES (:dataset_key, :version_id, :chunk_index, :rows, :row_count)'
         );
+        $chunkIndexStatement = $pdo->prepare(
+            'INSERT INTO pulse_dataset_chunk_index
+               (dataset_key, version_id, chunk_index, row_count, byte_length)
+             VALUES (:dataset_key, :version_id, :chunk_index, :row_count, :byte_length)
+             ON DUPLICATE KEY UPDATE row_count = VALUES(row_count), byte_length = VALUES(byte_length)'
+        );
         $chunkRows = [];
         $chunkBytes = 2;
         $chunkIndex = 0;
@@ -114,6 +235,7 @@ try {
             &$chunkBytes,
             &$chunkIndex,
             $chunkStatement,
+            $chunkIndexStatement,
             $datasetKey,
             $versionId
         ): void {
@@ -127,10 +249,18 @@ try {
             $chunkStatement->execute([
                 'dataset_key' => $datasetKey,
                 'version_id' => $versionId,
-                'chunk_index' => $chunkIndex++,
+                'chunk_index' => $chunkIndex,
                 'rows' => $chunkJson,
                 'row_count' => count($chunkRows),
             ]);
+            $chunkIndexStatement->execute([
+                'dataset_key' => $datasetKey,
+                'version_id' => $versionId,
+                'chunk_index' => $chunkIndex,
+                'row_count' => count($chunkRows),
+                'byte_length' => strlen($chunkJson),
+            ]);
+            $chunkIndex++;
             $chunkRows = [];
             $chunkBytes = 2;
         };
@@ -177,16 +307,22 @@ try {
                  WHERE dataset_key = :dataset_key AND version_id = :version_id'
             );
             $cleanup->execute(['dataset_key' => $datasetKey, 'version_id' => $versionId]);
+            $cleanup = $pdo->prepare(
+                'DELETE FROM pulse_dataset_chunk_index
+                 WHERE dataset_key = :dataset_key AND version_id = :version_id'
+            );
+            $cleanup->execute(['dataset_key' => $datasetKey, 'version_id' => $versionId]);
             throw $error;
         }
 
         try {
-            if ($previousVersion !== false && $previousVersion !== null) {
-                $cleanup = $pdo->prepare(
-                    'DELETE FROM pulse_dataset_chunks
-                     WHERE dataset_key = :dataset_key AND version_id = :version_id'
-                );
-                $cleanup->execute(['dataset_key' => $datasetKey, 'version_id' => $previousVersion]);
+            if ($previousVersion !== false && $previousVersion !== null && $previousVersion !== '') {
+                foreach (['pulse_dataset_chunks', 'pulse_dataset_chunk_index'] as $table) {
+                    $cleanup = $pdo->prepare(
+                        "DELETE FROM {$table} WHERE dataset_key = :dataset_key AND version_id = :version_id"
+                    );
+                    $cleanup->execute(['dataset_key' => $datasetKey, 'version_id' => $previousVersion]);
+                }
             }
         } catch (Throwable $error) {
             error_log('Pulse TiDB cleanup: ' . $error->getMessage());
@@ -202,12 +338,26 @@ try {
             'row_count' => count($payload['rows']),
             'saved_by' => $savedBy,
             'saved_at' => $savedAt,
+            'version' => $versionId,
+            'chunks' => $chunkIndex,
         ]);
     }
 
+    // DELETE: hapus dataset aktif beserta semua chunk-nya.
+    $oldVersion = $pdo->query(
+        "SELECT active_version FROM pulse_dataset WHERE dataset_key = 'active_dataset_v1'"
+    )->fetchColumn();
+    if ($oldVersion !== false && $oldVersion !== null && $oldVersion !== '') {
+        $pdo->prepare('DELETE FROM pulse_dataset_chunks WHERE dataset_key = :dataset_key AND version_id = :version_id')
+            ->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $oldVersion]);
+        $pdo->prepare('DELETE FROM pulse_dataset_chunk_index WHERE dataset_key = :dataset_key AND version_id = :version_id')
+            ->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $oldVersion]);
+    }
     $statement = $pdo->prepare('DELETE FROM pulse_dataset WHERE dataset_key = :dataset_key');
     $statement->execute(['dataset_key' => 'active_dataset_v1']);
     $statement = $pdo->prepare('DELETE FROM pulse_dataset_chunks WHERE dataset_key = :dataset_key');
+    $statement->execute(['dataset_key' => 'active_dataset_v1']);
+    $statement = $pdo->prepare('DELETE FROM pulse_dataset_chunk_index WHERE dataset_key = :dataset_key');
     $statement->execute(['dataset_key' => 'active_dataset_v1']);
     pulseRespond(['ok' => true]);
 } catch (JsonException $error) {

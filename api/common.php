@@ -15,26 +15,49 @@ function pulseRespond(array $payload, int $status = 200): void
     exit;
 }
 
+function pulseAllowedOrigins(): array
+{
+    $raw = trim((string) (getenv('PULSE_ALLOWED_ORIGIN') ?: ''));
+    if ($raw === '') {
+        return [];
+    }
+    // Boleh lebih dari satu origin, dipisah koma atau titik koma.
+    $origins = preg_split('/[\s,;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    return array_values(array_map(static fn (string $o): string => rtrim($o, '/'), $origins));
+}
+
+function pulseIsOriginAllowed(string $origin, array $allowedOrigins): bool
+{
+    if ($origin === '') {
+        return false;
+    }
+    if ($allowedOrigins === []) {
+        return preg_match('#^https?://(localhost|127\.0\.0\.1|pulse-cho\.test)(:\d+)?$#i', $origin) === 1;
+    }
+    foreach ($allowedOrigins as $allowed) {
+        if (hash_equals($allowed, rtrim($origin, '/'))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function pulseConfigureCors(): void
 {
-    $allowedOrigin = trim((string) (getenv('PULSE_ALLOWED_ORIGIN') ?: ''));
+    $allowedOrigins = pulseAllowedOrigins();
     $origin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
-    $isLocalOrigin = $allowedOrigin === ''
-        && preg_match('#^https?://(localhost|127\.0\.0\.1|pulse-cho\.test)(:\d+)?$#i', $origin) === 1;
+    $isAllowed = pulseIsOriginAllowed($origin, $allowedOrigins);
 
-    if ($origin !== '' && (
-        ($allowedOrigin !== '' && hash_equals($allowedOrigin, $origin))
-        || $isLocalOrigin
-    )) {
-        header('Access-Control-Allow-Origin: ' . ($allowedOrigin !== '' ? $allowedOrigin : $origin));
+    if ($origin !== '' && $isAllowed) {
+        header('Access-Control-Allow-Origin: ' . $origin);
         header('Access-Control-Allow-Credentials: true');
         header('Vary: Origin');
-    } elseif ($origin !== '' && $allowedOrigin !== '') {
+    } elseif ($origin !== '' && $allowedOrigins !== []) {
         pulseRespond(['error' => 'Origin tidak diizinkan.'], 403);
     }
 
     if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-        if ($allowedOrigin === '' && $origin !== '' && !$isLocalOrigin) {
+        if ($allowedOrigins === [] && $origin !== '' && !$isAllowed) {
             pulseRespond(['error' => 'PULSE_ALLOWED_ORIGIN belum dikonfigurasi.'], 503);
         }
         header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -47,15 +70,16 @@ function pulseConfigureCors(): void
 
 function pulseRequireAllowedOrigin(): void
 {
-    $allowedOrigin = trim((string) (getenv('PULSE_ALLOWED_ORIGIN') ?: ''));
+    $allowedOrigins = pulseAllowedOrigins();
     $origin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
-    $isLocalOrigin = $allowedOrigin === ''
-        && preg_match('#^https?://(localhost|127\.0\.0\.1|pulse-cho\.test)(:\d+)?$#i', $origin) === 1;
 
-    if ($allowedOrigin !== '' && ($origin === '' || !hash_equals($allowedOrigin, $origin))) {
-        pulseRespond(['error' => 'Origin tidak diizinkan.'], 403);
+    if ($allowedOrigins !== []) {
+        if ($origin === '' || !pulseIsOriginAllowed($origin, $allowedOrigins)) {
+            pulseRespond(['error' => 'Origin tidak diizinkan.'], 403);
+        }
+        return;
     }
-    if ($allowedOrigin === '' && $origin !== '' && !$isLocalOrigin) {
+    if ($origin !== '' && !pulseIsOriginAllowed($origin, [])) {
         pulseRespond(['error' => 'PULSE_ALLOWED_ORIGIN belum dikonfigurasi.'], 503);
     }
 }

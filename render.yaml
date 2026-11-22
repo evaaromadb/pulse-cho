@@ -7,7 +7,7 @@ services:
     healthCheckPath: /health.php
     envVars:
       - key: PULSE_ALLOWED_ORIGIN
-        value: https://pulse-cho.onrender.com
+        value: https://pulse-cho.onrender.com,http://localhost,http://127.0.0.1
       - key: PULSE_TIDB_HOST
         sync: false
       - key: PULSE_TIDB_PORT

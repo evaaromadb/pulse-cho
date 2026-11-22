@@ -1,12 +1,12 @@
 FROM php:8.3-apache
 
-RUN docker-php-ext-install pdo_mysql \
+RUN docker-php-ext-install pdo_mysql opcache \
     && a2enmod headers \
     && printf '<Directory /var/www/html>\nAllowOverride All\nRequire all granted\n</Directory>\n' > /etc/apache2/conf-available/pulse-api.conf \
     && a2enconf pulse-api
 
 COPY php.ini /usr/local/etc/php/conf.d/pulse.ini
-COPY common.php auth.php dataset.php health.php .htaccess /var/www/html/
+COPY common.php auth.php dataset.php health.php migrate-schema.php bootstrap-admin.php .htaccess /var/www/html/
 
 ENV PORT=10000
 EXPOSE 10000

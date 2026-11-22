@@ -29,7 +29,7 @@ try {
         }
 
         $statement = $pdo->prepare(
-            'SELECT username, password_hash, is_active
+            'SELECT username, full_name, role, site, password_hash, is_active
              FROM pulse_users WHERE username = :username LIMIT 1'
         );
         $statement->execute(['username' => $username]);
@@ -72,7 +72,14 @@ try {
             'username' => $account['username'],
         ]);
         pulseSetSessionCookie($token, PULSE_SESSION_TTL_SECONDS);
-        pulseRespond(['ok' => true, 'user' => pulseCurrentUser($pdo)]);
+        // Cookie dari setcookie() baru terbaca di request berikutnya, jadi jangan
+        // memanggil pulseCurrentUser() di sini — pakai data akun yang sudah diverifikasi.
+        pulseRespond(['ok' => true, 'user' => [
+            'username' => (string) $account['username'],
+            'namaLengkap' => (string) $account['full_name'],
+            'role' => (string) $account['role'],
+            'site' => (string) $account['site'],
+        ]]);
     }
 
     if ($action === 'logout' && $method === 'POST') {

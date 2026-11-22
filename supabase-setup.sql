@@ -1,2 +1,0 @@
--- Setup Supabase sudah tidak digunakan oleh aplikasi.
--- Gunakan tidb-setup.sql untuk membuat database dan tabel pada TiDB.
