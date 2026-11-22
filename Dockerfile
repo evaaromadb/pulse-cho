@@ -4,6 +4,9 @@
 #
 # Build context = root repo. Di Render: New > Web Service > Docker,
 # Dockerfile Path = ./Dockerfile (bukan ./api/Dockerfile).
+#
+# CATATAN: ./api/Dockerfile adalah salinan identik (untuk build context api/).
+# Jika mengubah Dockerfile ini, ubah juga ./api/Dockerfile.
 
 FROM php:8.3-apache
 

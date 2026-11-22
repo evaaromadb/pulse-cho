@@ -1,20 +1,18 @@
-# Auto-detect untuk Render "Blueprint" (render.yaml).
-# Blueprint lama menunjuk layanan ke ./api/Dockerfile; agar build dari folder api/
-# tetap berhasil, TIDAK ada Dockerfile yang menyalin index.html di sini.
-# Dockerfile utama (menyajikan UI + API satu domain) ada di root: ../Dockerfile
-#
-# Rekomendasi: hapus layanan ini dan buat Web Service dengan
-#   Dockerfile Path = ./Dockerfile  (root repo, satu domain, tanpa CORS)
-
 FROM php:8.3-apache
 
+# Gabungan: halaman aplikasi di / DAN API di /api — satu service, satu domain.
 RUN docker-php-ext-install pdo_mysql opcache \
     && a2enmod headers \
-    && printf '<Directory /var/www/html>\nAllowOverride All\nRequire all granted\n</Directory>\n' > /etc/apache2/conf-available/pulse-api.conf \
-    && a2enconf pulse-api
+    && printf '<Directory /var/www/html>\nAllowOverride All\nRequire all granted\n</Directory>\n' > /etc/apache2/conf-available/pulse-app.conf \
+    && a2enconf pulse-app
 
-COPY php.ini /usr/local/etc/php/conf.d/pulse.ini
-COPY common.php auth.php dataset.php health.php migrate-schema.php bootstrap-admin.php .htaccess /var/www/html/
+COPY api/php.ini /usr/local/etc/php/conf.d/pulse.ini
+
+# Halaman aplikasi: https://<domain>/
+COPY index.html /var/www/html/index.html
+
+# API: https://<domain>/api/...
+COPY api/ /var/www/html/api/
 
 ENV PORT=10000
 EXPOSE 10000
