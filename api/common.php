@@ -48,7 +48,9 @@ function pulseIsSameOrigin(string $origin): bool
         return true;
     }
     $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
+    $scheme = $isHttps ? 'https' : 'http';
     return $origin === ($scheme . '://' . $host);
 }
 
