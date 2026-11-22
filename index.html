@@ -254,6 +254,203 @@
       max-width: 100%;
       overflow-x: hidden;
     }
+
+    /* =====================================================================
+       LIGHT MODE COMPREHENSIVE OVERRIDES
+       Memastikan semua teks, latar, border, dan form terbaca di Mode Terang
+       ===================================================================== */
+    html:not(.dark) main,
+    html:not(.dark) #drilldown-modal,
+    html:not(.dark) #user-mgmt-modal {
+      color-scheme: light;
+    }
+
+    /* --- Latar belakang slate (600 - 950) termasuk opacity --- */
+    html:not(.dark) main .bg-slate-600,
+    html:not(.dark) main .bg-slate-700,
+    html:not(.dark) main .bg-slate-800,
+    html:not(.dark) main .bg-slate-800\/80,
+    html:not(.dark) main .bg-slate-800\/70,
+    html:not(.dark) main .bg-slate-800\/60,
+    html:not(.dark) main .bg-slate-800\/50,
+    html:not(.dark) main .bg-slate-900,
+    html:not(.dark) main .bg-slate-900\/90,
+    html:not(.dark) main .bg-slate-900\/85,
+    html:not(.dark) main .bg-slate-900\/80,
+    html:not(.dark) main .bg-slate-900\/75,
+    html:not(.dark) main .bg-slate-900\/70,
+    html:not(.dark) main .bg-slate-900\/60,
+    html:not(.dark) main .bg-slate-950,
+    html:not(.dark) main .bg-slate-950\/90,
+    html:not(.dark) main .bg-slate-950\/85,
+    html:not(.dark) main .bg-slate-950\/80,
+    html:not(.dark) main .bg-slate-950\/75,
+    html:not(.dark) main .bg-slate-950\/70,
+    html:not(.dark) main .bg-slate-950\/65,
+    html:not(.dark) main .bg-slate-950\/60,
+    html:not(.dark) main .bg-slate-950\/55,
+    html:not(.dark) main .bg-slate-950\/50,
+    html:not(.dark) #drilldown-modal .bg-slate-600,
+    html:not(.dark) #drilldown-modal .bg-slate-700,
+    html:not(.dark) #drilldown-modal .bg-slate-800,
+    html:not(.dark) #drilldown-modal .bg-slate-800\/80,
+    html:not(.dark) #drilldown-modal .bg-slate-800\/70,
+    html:not(.dark) #drilldown-modal .bg-slate-900,
+    html:not(.dark) #drilldown-modal .bg-slate-900\/80,
+    html:not(.dark) #drilldown-modal .bg-slate-950,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/90,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/85,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/80,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/75,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/70,
+    html:not(.dark) #drilldown-modal .bg-slate-950\/60,
+    html:not(.dark) #user-mgmt-modal .bg-slate-600,
+    html:not(.dark) #user-mgmt-modal .bg-slate-700,
+    html:not(.dark) #user-mgmt-modal .bg-slate-800,
+    html:not(.dark) #user-mgmt-modal .bg-slate-800\/80,
+    html:not(.dark) #user-mgmt-modal .bg-slate-800\/70,
+    html:not(.dark) #user-mgmt-modal .bg-slate-900,
+    html:not(.dark) #user-mgmt-modal .bg-slate-900\/90,
+    html:not(.dark) #user-mgmt-modal .bg-slate-900\/85,
+    html:not(.dark) #user-mgmt-modal .bg-slate-900\/80,
+    html:not(.dark) #user-mgmt-modal .bg-slate-900\/75,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/90,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/85,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/80,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/75,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/70,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/65,
+    html:not(.dark) #user-mgmt-modal .bg-slate-950\/60 {
+      background-color: #ffffff !important;
+      border-color: #cbd5e1 !important;
+    }
+
+    /* --- Warna teks slate (100 - 500) dan white --- */
+    html:not(.dark) main .text-white,
+    html:not(.dark) main .text-slate-100,
+    html:not(.dark) main .text-slate-200,
+    html:not(.dark) main .text-slate-300,
+    html:not(.dark) main .text-slate-400,
+    html:not(.dark) main .text-slate-500,
+    html:not(.dark) #drilldown-modal .text-white,
+    html:not(.dark) #drilldown-modal .text-slate-100,
+    html:not(.dark) #drilldown-modal .text-slate-200,
+    html:not(.dark) #drilldown-modal .text-slate-300,
+    html:not(.dark) #drilldown-modal .text-slate-400,
+    html:not(.dark) #drilldown-modal .text-slate-500,
+    html:not(.dark) #user-mgmt-modal .text-white,
+    html:not(.dark) #user-mgmt-modal .text-slate-100,
+    html:not(.dark) #user-mgmt-modal .text-slate-200,
+    html:not(.dark) #user-mgmt-modal .text-slate-300,
+    html:not(.dark) #user-mgmt-modal .text-slate-400,
+    html:not(.dark) #user-mgmt-modal .text-slate-500 {
+      color: #1e293b !important;
+    }
+    html:not(.dark) main .text-slate-400,
+    html:not(.dark) main .text-slate-500,
+    html:not(.dark) #drilldown-modal .text-slate-400,
+    html:not(.dark) #drilldown-modal .text-slate-500,
+    html:not(.dark) #user-mgmt-modal .text-slate-400,
+    html:not(.dark) #user-mgmt-modal .text-slate-500 {
+      color: #64748b !important;
+    }
+
+    /* --- Border slate (600 - 800) termasuk opacity --- */
+    html:not(.dark) main .border-slate-600,
+    html:not(.dark) main .border-slate-700,
+    html:not(.dark) main .border-slate-800,
+    html:not(.dark) main .border-slate-800\/80,
+    html:not(.dark) main .border-slate-800\/70,
+    html:not(.dark) main .divide-slate-800\/80,
+    html:not(.dark) #drilldown-modal .border-slate-600,
+    html:not(.dark) #drilldown-modal .border-slate-700,
+    html:not(.dark) #drilldown-modal .border-slate-800,
+    html:not(.dark) #drilldown-modal .border-slate-800\/80,
+    html:not(.dark) #drilldown-modal .divide-slate-800\/80,
+    html:not(.dark) #user-mgmt-modal .border-slate-600,
+    html:not(.dark) #user-mgmt-modal .border-slate-700,
+    html:not(.dark) #user-mgmt-modal .border-slate-800,
+    html:not(.dark) #user-mgmt-modal .border-slate-800\/80,
+    html:not(.dark) #user-mgmt-modal .divide-slate-800\/80 {
+      border-color: #cbd5e1 !important;
+    }
+    html:not(.dark) main .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+    html:not(.dark) #drilldown-modal .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+    html:not(.dark) #user-mgmt-modal .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]) {
+      border-color: #e2e8f0 !important;
+    }
+
+    /* --- Elemen form: input, select, textarea --- */
+    html:not(.dark) main input,
+    html:not(.dark) main select,
+    html:not(.dark) main textarea,
+    html:not(.dark) #drilldown-modal input,
+    html:not(.dark) #drilldown-modal select,
+    html:not(.dark) #drilldown-modal textarea,
+    html:not(.dark) #user-mgmt-modal input,
+    html:not(.dark) #user-mgmt-modal select,
+    html:not(.dark) #user-mgmt-modal textarea {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
+      border-color: #cbd5e1 !important;
+    }
+    html:not(.dark) main input::placeholder,
+    html:not(.dark) main textarea::placeholder,
+    html:not(.dark) #drilldown-modal input::placeholder,
+    html:not(.dark) #drilldown-modal textarea::placeholder,
+    html:not(.dark) #user-mgmt-modal input::placeholder,
+    html:not(.dark) #user-mgmt-modal textarea::placeholder {
+      color: #94a3b8 !important;
+      opacity: 1;
+    }
+    html:not(.dark) main select option,
+    html:not(.dark) #drilldown-modal select option,
+    html:not(.dark) #user-mgmt-modal select option {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
+    }
+
+    /* --- Tabel --- */
+    html:not(.dark) main table,
+    html:not(.dark) #drilldown-modal table,
+    html:not(.dark) #user-mgmt-modal table {
+      color: #1e293b !important;
+    }
+    html:not(.dark) main thead,
+    html:not(.dark) #drilldown-modal thead,
+    html:not(.dark) #user-mgmt-modal thead {
+      background-color: #f1f5f9 !important;
+    }
+
+    /* --- Backdrop modal --- */
+    html:not(.dark) #drilldown-modal,
+    html:not(.dark) #user-mgmt-modal {
+      background-color: rgba(15, 23, 42, 0.4) !important;
+    }
+
+    /* --- Scrollbar mode terang --- */
+    html:not(.dark) ::-webkit-scrollbar-track {
+      background: rgba(148, 163, 184, 0.2);
+    }
+    html:not(.dark) ::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.4);
+    }
+
+    /* --- Pastikan teks pada tombol berwarna tetap putih --- */
+    html:not(.dark) main .bg-orange-500,
+    html:not(.dark) main .bg-orange-600,
+    html:not(.dark) main .bg-emerald-600,
+    html:not(.dark) main .bg-emerald-500,
+    html:not(.dark) main .bg-red-600,
+    html:not(.dark) main .bg-red-500,
+    html:not(.dark) main .bg-blue-600,
+    html:not(.dark) main .bg-sky-600,
+    html:not(.dark) main .bg-indigo-600,
+    html:not(.dark) main .bg-purple-600,
+    html:not(.dark) main .bg-amber-500 {
+      color: #ffffff !important;
+    }
   </style>
   <script>
     // =========================================================================
