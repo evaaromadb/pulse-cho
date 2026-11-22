@@ -579,7 +579,8 @@
       font-size: 8.5px;
       line-height: 1.2;
     }
-    /* Highlight nama pengirim: soft glow + aksen halus yang serasi tema terang/gelap. */
+    /* Badge nama pengirim: warna unik per user (dari hash username/user_id).
+       Nilai --pc-* di-set oleh JS pada elemen baris pesan, dengan fallback oranye tema. */
     .pulse-chat-name {
       display: inline-block;
       max-width: 100%;
@@ -592,35 +593,56 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      color: #c2410c;
-      background-color: rgba(249, 115, 22, 0.1);
-      border: 1px solid rgba(249, 115, 22, 0.22);
-      box-shadow: 0 1px 3px rgba(249, 115, 22, 0.18);
+      color: var(--pc-user-fg, #c2410c);
+      background-color: var(--pc-user-bg, rgba(249, 115, 22, 0.1));
+      border: 1px solid var(--pc-user-bd, rgba(249, 115, 22, 0.22));
+      box-shadow: var(--pc-user-glow, 0 1px 3px rgba(249, 115, 22, 0.18));
     }
     html.dark .pulse-chat-name {
-      color: #fdba74;
-      background-color: rgba(249, 115, 22, 0.16);
-      border-color: rgba(249, 115, 22, 0.38);
-      box-shadow: 0 0 10px rgba(249, 115, 22, 0.28), 0 1px 3px rgba(0, 0, 0, 0.35);
+      color: var(--pc-user-fg-d, #fdba74);
+      background-color: var(--pc-user-bg-d, rgba(249, 115, 22, 0.16));
+      border-color: var(--pc-user-bd-d, rgba(249, 115, 22, 0.38));
+      box-shadow: var(--pc-user-glow-d, 0 0 10px rgba(249, 115, 22, 0.28), 0 1px 3px rgba(0, 0, 0, 0.35));
     }
-    /* Pesan milik sendiri memakai aksen amber agar mudah dibedakan. */
-    .pulse-chat-mine .pulse-chat-name {
-      color: #b45309;
-      background-color: rgba(245, 158, 11, 0.12);
-      border-color: rgba(245, 158, 11, 0.26);
-      box-shadow: 0 1px 3px rgba(245, 158, 11, 0.2);
+    /* Aksen garis/outline bubble mengikuti warna identitas pengirim. */
+    .pulse-chat-bubble {
+      border-color: var(--pc-line, #cbd5e1);
     }
-    html.dark .pulse-chat-mine .pulse-chat-name {
-      color: #fcd34d;
-      background-color: rgba(245, 158, 11, 0.18);
-      border-color: rgba(245, 158, 11, 0.4);
-      box-shadow: 0 0 10px rgba(245, 158, 11, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
+    html.dark .pulse-chat-bubble {
+      border-color: var(--pc-line-d, #475569);
+    }
+    /* Identitas user pada daftar "All User": avatar + nama memakai warna yang sama
+       dengan warna nama pengirim di kolom chat. */
+    .pulse-chat-user-avatar {
+      color: var(--pc-user-fg, #ffffff);
+      background-color: var(--pc-user-bg, rgba(100, 116, 139, 0.9));
+      border: 1px solid var(--pc-user-bd, transparent);
+      box-shadow: var(--pc-user-glow, none);
+    }
+    html.dark .pulse-chat-user-avatar {
+      color: var(--pc-user-fg-d, #ffffff);
+      background-color: var(--pc-user-bg-d, rgba(100, 116, 139, 0.9));
+      border-color: var(--pc-user-bd-d, transparent);
+      box-shadow: var(--pc-user-glow-d, none);
+    }
+    .pulse-chat-user-name {
+      color: var(--pc-user-fg, #334155);
+    }
+    html.dark .pulse-chat-user-name {
+      color: var(--pc-user-fg-d, #f1f5f9);
+    }
+    /* Judul DM memakai warna identitas lawan bicara. */
+    #pulse-chat-conv-title {
+      color: var(--pc-user-fg, #334155);
+    }
+    html.dark #pulse-chat-conv-title {
+      color: var(--pc-user-fg-d, #f1f5f9);
     }
     /* Revisi UI: ukuran & jenis font kolom chat diatur lewat CSS variable yang
        nilainya disimpan di localStorage (preferensi tampilan per-user).
-       Default 8px, line-height 1.25, teks tetap dapat diblok & di-copy. */
+       Default 11px, line-height 1.25, teks tetap dapat diblok & di-copy. */
     #pulse-chat-panel {
-      --pulse-chat-font-size: 8px;
+      --pulse-chat-font-size: 11px;
       --pulse-chat-font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
     }
     #pulse-chat-panel,
@@ -5734,8 +5756,8 @@
     // Preferensi tampilan chat (disimpan di localStorage — tanpa beban server/TiDB).
     const PULSE_CHAT_FONT_SIZE_KEY = 'pulse_cho_chat_font_size_v1';
     const PULSE_CHAT_FONT_FAMILY_KEY = 'pulse_cho_chat_font_family_v1';
-    const PULSE_CHAT_FONT_SIZES = [6, 8, 10, 12, 14];
-    const PULSE_CHAT_DEFAULT_FONT_SIZE = 8;
+    const PULSE_CHAT_FONT_SIZES = [6, 8, 10, 11, 12, 14];
+    const PULSE_CHAT_DEFAULT_FONT_SIZE = 11;
     const PULSE_CHAT_DEFAULT_FONT_FAMILY = 'system';
     const PULSE_CHAT_FONT_FAMILIES = [
       { key: 'system', label: 'Default Sistem (Sans-serif)', stack: "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" },
@@ -5744,6 +5766,34 @@
       { key: 'arial', label: 'Arial', stack: "Arial, Helvetica, sans-serif" },
       { key: 'mono', label: 'Monospace / Consolas (log tiket)', stack: "'Consolas', 'JetBrains Mono', 'Courier New', monospace" }
     ];
+    // Palet hue identitas user: dipilih deterministik dari hash username/user_id.
+    // Hue dibuat berjarak agar antar akun mudah dibedakan sekilas.
+    const PULSE_CHAT_IDENTITY_HUES = [0, 18, 38, 58, 88, 130, 165, 185, 205, 228, 252, 278, 305, 332];
+
+    /** Hash deterministik dari user_id/username untuk memilih warna identitas user. */
+    function chatIdentityHash(seed) {
+      const text = String(seed == null ? '' : seed);
+      let hash = 5381;
+      for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+      }
+      return Math.abs(hash);
+    }
+    /** Terapkan warna identitas (badge nama, teks ID user, aksen garis bubble) ke sebuah elemen. */
+    function applyChatUserColors(el, seed) {
+      if (!el) return;
+      const hue = PULSE_CHAT_IDENTITY_HUES[chatIdentityHash(seed) % PULSE_CHAT_IDENTITY_HUES.length];
+      el.style.setProperty('--pc-user-fg', `hsl(${hue}, 62%, 30%)`);
+      el.style.setProperty('--pc-user-bg', `hsla(${hue}, 78%, 45%, 0.14)`);
+      el.style.setProperty('--pc-user-bd', `hsla(${hue}, 70%, 45%, 0.42)`);
+      el.style.setProperty('--pc-user-glow', `0 1px 3px hsla(${hue}, 70%, 40%, 0.25)`);
+      el.style.setProperty('--pc-user-fg-d', `hsl(${hue}, 85%, 76%)`);
+      el.style.setProperty('--pc-user-bg-d', `hsla(${hue}, 80%, 55%, 0.22)`);
+      el.style.setProperty('--pc-user-bd-d', `hsla(${hue}, 78%, 62%, 0.5)`);
+      el.style.setProperty('--pc-user-glow-d', `0 0 10px hsla(${hue}, 80%, 55%, 0.3)`);
+      el.style.setProperty('--pc-line', `hsla(${hue}, 62%, 42%, 0.55)`);
+      el.style.setProperty('--pc-line-d', `hsla(${hue}, 75%, 62%, 0.6)`);
+    }
 
     const pulseChatState = {
       active: false,
@@ -6078,10 +6128,12 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-200/70 dark:hover:bg-slate-800/70 text-left transition';
+        // ID/identitas user diberi warna unik (konsisten dengan warna nama di kolom chat).
+        applyChatUserColors(btn, user.username || user.user_id || user.full_name);
         const avWrap = document.createElement('span');
         avWrap.className = 'relative shrink-0';
         const av = document.createElement('span');
-        av.className = 'w-7 h-7 rounded-full bg-gradient-to-br from-slate-500 to-slate-700 text-white text-[10px] font-bold flex items-center justify-center';
+        av.className = 'pulse-chat-user-avatar w-7 h-7 rounded-full text-[10px] font-bold flex items-center justify-center';
         av.textContent = chatInitials(user.full_name || user.username);
         const dot = document.createElement('span');
         // Titik hijau = online (last_seen <= beberapa menit), abu-abu = offline.
@@ -6092,7 +6144,7 @@
         const info = document.createElement('span');
         info.className = 'min-w-0 flex-1';
         const name = document.createElement('span');
-        name.className = 'block text-[11px] font-semibold text-slate-700 dark:text-slate-100 truncate';
+        name.className = 'pulse-chat-user-name block text-[11px] font-semibold truncate';
         name.textContent = user.full_name || user.username;
         const sub = document.createElement('span');
         sub.className = 'block text-[9px] truncate ' + (online ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500');
@@ -6157,6 +6209,15 @@
       }
       const title = document.getElementById('pulse-chat-conv-title');
       if (title) title.textContent = pulseChatState.peer ? ('DM · ' + (pulseChatState.convTitle || pulseChatState.peer)) : chatCurrentGroupName();
+      // Judul DM memakai warna identitas lawan bicara (konsisten dengan badge nama di kolom chat).
+      if (head) {
+        if (pulseChatState.peer) {
+          applyChatUserColors(head, pulseChatState.peer);
+        } else {
+          head.style.removeProperty('--pc-user-fg');
+          head.style.removeProperty('--pc-user-fg-d');
+        }
+      }
       const sub = document.getElementById('pulse-chat-conv-sub');
       if (sub) sub.textContent = pulseChatState.peer ? chatPeerSubtitle(pulseChatState.peer) : '';
       setChatTabStyle(document.getElementById('pulse-chat-tab-chat'), isChat);
@@ -6345,24 +6406,26 @@
     }
     function buildChatMessageEl(msg, isMine) {
       const wrap = document.createElement('div');
-      wrap.className = (isMine ? 'flex flex-col items-end' : 'flex flex-col items-start') + (isMine ? ' pulse-chat-mine' : '');
+      wrap.className = isMine ? 'flex flex-col items-end' : 'flex flex-col items-start';
       wrap.dataset.chatId = String(msg.id);
       wrap.dataset.createdTs = String(msg.created_ts || 0);
       wrap.dataset.owner = isMine ? 'me' : 'other';
+      // Warna identitas unik per akun: dipakai badge nama pengirim + aksen garis bubble.
+      applyChatUserColors(wrap, msg.username || msg.user_id || msg.full_name);
 
       const meta = buildChatMetaEl(msg);
 
       const bubble = document.createElement('div');
       // Gaya ala WhatsApp: latar putih bersih (#FFFFFF) + garis tepi tipis 1px (bukan blok warna penuh).
-      // Lebar bubble mengikuti isi teks (max-width dibatasi agar tidak meluber) dan tinggi
-      // mengikuti jumlah baris; ukuran font & line-height diatur di CSS agar ringkas.
-      let bubbleClass = 'pulse-chat-bubble px-2 py-1.5 rounded-2xl border ';
+      // Warna garis mengikuti warna identitas pengirim (lihat .pulse-chat-bubble di CSS);
+      // lebar bubble mengikuti isi teks (dibatasi max-width) dan tinggi mengikuti jumlah baris.
+      let bubbleClass = 'pulse-chat-bubble px-2 py-1.5 rounded-2xl border bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 ';
       if (isMine) {
-        bubbleClass += 'rounded-br-sm bg-white dark:bg-slate-800 border-orange-300 dark:border-orange-500/60 text-slate-800 dark:text-slate-100';
+        bubbleClass += 'rounded-br-sm';
       } else if (isChatMentionOfMe(msg)) {
-        bubbleClass += 'rounded-bl-sm bg-white dark:bg-slate-800 border-amber-400 ring-1 ring-amber-400 text-slate-800 dark:text-slate-100';
+        bubbleClass += 'rounded-bl-sm ring-1 ring-amber-400';
       } else {
-        bubbleClass += 'rounded-bl-sm bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100';
+        bubbleClass += 'rounded-bl-sm';
       }
       bubble.className = bubbleClass;
       bubble.textContent = msg.message;
