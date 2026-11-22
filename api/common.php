@@ -42,24 +42,31 @@ function pulseIsOriginAllowed(string $origin, array $allowedOrigins): bool
     return false;
 }
 
+function pulseIsSameOrigin(string $origin): bool
+{
+    if ($origin === '') {
+        return true;
+    }
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    return $origin === ($scheme . '://' . $host);
+}
+
 function pulseConfigureCors(): void
 {
     $allowedOrigins = pulseAllowedOrigins();
     $origin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
-    $isAllowed = pulseIsOriginAllowed($origin, $allowedOrigins);
+    $isAllowed = pulseIsOriginAllowed($origin, $allowedOrigins) || pulseIsSameOrigin($origin);
 
     if ($origin !== '' && $isAllowed) {
         header('Access-Control-Allow-Origin: ' . $origin);
         header('Access-Control-Allow-Credentials: true');
         header('Vary: Origin');
-    } elseif ($origin !== '' && $allowedOrigins !== []) {
+    } elseif ($origin !== '' && $allowedOrigins !== [] && !pulseIsSameOrigin($origin)) {
         pulseRespond(['error' => 'Origin tidak diizinkan.'], 403);
     }
 
     if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
-        if ($allowedOrigins === [] && $origin !== '' && !$isAllowed) {
-            pulseRespond(['error' => 'PULSE_ALLOWED_ORIGIN belum dikonfigurasi.'], 503);
-        }
         header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
         header('Access-Control-Allow-Headers: Content-Type');
         header('Access-Control-Max-Age: 600');
@@ -73,15 +80,17 @@ function pulseRequireAllowedOrigin(): void
     $allowedOrigins = pulseAllowedOrigins();
     $origin = trim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''));
 
+    // Request dari domain yang sama dengan API selalu sah (mode satu domain).
+    if (pulseIsSameOrigin($origin)) {
+        return;
+    }
     if ($allowedOrigins !== []) {
-        if ($origin === '' || !pulseIsOriginAllowed($origin, $allowedOrigins)) {
+        if (!pulseIsOriginAllowed($origin, $allowedOrigins)) {
             pulseRespond(['error' => 'Origin tidak diizinkan.'], 403);
         }
         return;
     }
-    if ($origin !== '' && !pulseIsOriginAllowed($origin, [])) {
-        pulseRespond(['error' => 'PULSE_ALLOWED_ORIGIN belum dikonfigurasi.'], 503);
-    }
+    pulseRespond(['error' => 'Origin tidak diizinkan. Tambahkan domain ini ke PULSE_ALLOWED_ORIGIN.'], 403);
 }
 
 function pulseDatabase(): PDO
@@ -101,7 +110,8 @@ function pulseDatabase(): PDO
         'ssl_ca' => getenv('PULSE_TIDB_CA_PATH') ?: ($config['ssl_ca'] ?? ''),
     ];
 
-    foreach (['host', 'database', 'username', 'password', 'ssl_ca'] as $key) {
+    $hasCa = trim((string) $config['ssl_ca']) !== '';
+    foreach (['host', 'database', 'username', 'password'] as $key) {
         if (trim((string) $config[$key]) === '') {
             throw new InvalidArgumentException('Konfigurasi TiDB belum lengkap.');
         }
@@ -109,7 +119,7 @@ function pulseDatabase(): PDO
     if (!extension_loaded('pdo_mysql')) {
         throw new RuntimeException('Ekstensi PHP pdo_mysql belum aktif.');
     }
-    if (!is_file($config['ssl_ca'])) {
+    if ($hasCa && !is_file($config['ssl_ca'])) {
         throw new InvalidArgumentException('File CA TLS TiDB tidak ditemukan.');
     }
 
@@ -117,9 +127,16 @@ function pulseDatabase(): PDO
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
-        PDO::MYSQL_ATTR_SSL_CA => $config['ssl_ca'],
     ];
-    if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+    if ($hasCa) {
+        // CA khusus TiDB (paling aman: verifikasi penuh)
+        $options[PDO::MYSQL_ATTR_SSL_CA] = $config['ssl_ca'];
+        if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+            $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+        }
+    } else {
+        // Tanpa file CA: tetap pakai TLS dengan CA bawaan sistem operasi.
+        // Port 4000 TiDB mewajibkan TLS, jadi jangan jatuh ke koneksi plaintext.
         $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
     }
 
@@ -218,12 +235,15 @@ function pulseSetSessionCookie(string $token, int $maxAge): void
 {
     $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $forwardedProto === 'https';
+    // Mode satu domain (UI + API di host yang sama): Lax sudah cukup dan paling
+    // kompatibel. SameSite=None hanya diperlukan bila API berada di host lain.
+    $isSameOrigin = pulseIsSameOrigin(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')));
     setcookie(PULSE_SESSION_COOKIE, $token, [
         'expires' => time() + $maxAge,
         'path' => '/',
         'secure' => $secure,
         'httponly' => true,
-        'samesite' => $secure ? 'None' : 'Lax',
+        'samesite' => (!$isSameOrigin && $secure) ? 'None' : 'Lax',
     ]);
 }
 

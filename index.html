@@ -258,16 +258,23 @@
   <script>
     // =========================================================================
     // TIDB API CONFIG — koneksi database disimpan di backend PHP, bukan browser.
+    // Jika halaman ini dilayani oleh server yang sama dengan folder api/ (Render
+    // Docker, VPS, atau Laragon), API otomatis memakai path relatif "api" sehingga
+    // tidak perlu PULSE_API_BASE_URL dan tidak ada masalah CORS.
     // =========================================================================
+    // Arahkan ke URL API lain HANYA jika API memang berada di host terpisah,
+    // mis. 'https://api.domain-anda.com'. Biarkan kosong untuk mode satu domain.
+    window.PULSE_API_BASE_URL_OVERRIDE = '';
+
     const pulseLocalHost = /^(localhost|127\.0\.0\.1|pulse-cho\.test)$/i.test(window.location.hostname);
-    const pulseDefaultApiUrl = pulseLocalHost
-      ? new URL('api', document.baseURI).toString()
-      : 'https://pulse-cho-api.onrender.com';
+    const pulseRelativeApi = `${window.location.origin}${new URL('api', document.baseURI).pathname.replace(/\/$/, '')}`;
+    const pulseDefaultApiUrl = window.PULSE_API_BASE_URL_OVERRIDE || pulseRelativeApi;
     window.PULSE_API_BASE_URL = (window.PULSE_API_BASE_URL || pulseDefaultApiUrl).replace(/\/+$/, '');
     window.PULSE_CLOUD_CONFIG = {
       url: `${window.PULSE_API_BASE_URL}/dataset.php`,
       authUrl: `${window.PULSE_API_BASE_URL}/auth.php`,
-      provider: 'TiDB'
+      provider: 'TiDB',
+      sameOrigin: window.PULSE_API_BASE_URL.startsWith(window.location.origin)
     };
     window.PULSE_CLOUD_CONFIG.isConfigured = window.location.protocol !== 'file:';
   </script>

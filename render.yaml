@@ -1,13 +1,21 @@
+# PULSE CHO — satu Web Service (Docker) berisi halaman + API.
+# Di Render: New + > Web Service > Build & deploy from a Git repository,
+#   Root Directory: (kosong)
+#   Runtime: Docker
+#   Dockerfile Path: ./Dockerfile
+#   Health Check Path: /api/health.php
+#
+# Alternatif "Blueprint" (opsional) memakai file ini apa adanya;
+# tidak wajib blueprint — form manual menghasilkan layanan yang sama.
 services:
   - type: web
-    name: pulse-cho-api
+    name: pulse-cho
     runtime: docker
-    dockerContext: ./api
-    dockerfilePath: ./api/Dockerfile
-    healthCheckPath: /health.php
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health.php
     envVars:
-      - key: PULSE_ALLOWED_ORIGIN
-        value: https://pulse-cho.onrender.com,http://localhost,http://127.0.0.1
+      # Kredensial TiDB (isi di dashboard, jangan di-commit)
       - key: PULSE_TIDB_HOST
         sync: false
       - key: PULSE_TIDB_PORT
@@ -18,13 +26,11 @@ services:
         sync: false
       - key: PULSE_TIDB_PASSWORD
         sync: false
+      # Opsional: hanya bila memakai Secret File berisi CA TiDB.
+      # Jika kosong, koneksi TLS tetap jalan memakai CA bawaan sistem.
       - key: PULSE_TIDB_CA_PATH
         value: /etc/secrets/tidb-ca.pem
-      - key: PULSE_ADMIN_USERNAME
-        sync: false
-      - key: PULSE_ADMIN_PASSWORD
-        sync: false
-      - key: PULSE_ADMIN_NAME
-        sync: false
-      - key: PULSE_ADMIN_SITE
-        sync: false
+      # UI dan API satu domain, jadi CORS tidak dibutuhkan.
+      # Isi hanya jika API diakses dari domain lain.
+      - key: PULSE_ALLOWED_ORIGIN
+        value: ""
