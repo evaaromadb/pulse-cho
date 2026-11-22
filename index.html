@@ -6,7 +6,7 @@
   <title>PULSE CHO — Monitoring KPI Daily &amp; Skala Prioritas Telkomsel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
   <!-- Tailwind Play CDN (wajib dimuat SEBELUM tailwind.config) & Chart.js -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -616,12 +616,18 @@
       border-color: rgba(245, 158, 11, 0.4);
       box-shadow: 0 0 10px rgba(245, 158, 11, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
     }
-    /* Revisi UI: seluruh teks di dalam kolom/panel chat memakai ukuran 6px agar
-       kronologi panjang sangat ringkas, line-height 1.25, tetap dapat diblok & di-copy. */
+    /* Revisi UI: ukuran & jenis font kolom chat diatur lewat CSS variable yang
+       nilainya disimpan di localStorage (preferensi tampilan per-user).
+       Default 8px, line-height 1.25, teks tetap dapat diblok & di-copy. */
+    #pulse-chat-panel {
+      --pulse-chat-font-size: 8px;
+      --pulse-chat-font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    }
     #pulse-chat-panel,
     #pulse-chat-panel * {
-      font-size: 6px !important;
+      font-size: var(--pulse-chat-font-size) !important;
       line-height: 1.25 !important;
+      font-family: var(--pulse-chat-font-family) !important;
     }
     #pulse-chat-panel *,
     #pulse-chat-panel textarea,
@@ -1090,10 +1096,24 @@
     <div class="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl">
       <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900 z-10">
         <span class="text-sm">⚙️</span>
-        <p class="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">Pengaturan Grup Chat</p>
+        <p class="text-sm font-bold text-slate-800 dark:text-slate-100 flex-1">Pengaturan Chat</p>
         <button type="button" onclick="closeChatSettings()" title="Tutup" class="w-7 h-7 rounded-md bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center text-xs transition">✕</button>
       </div>
       <div class="p-4 space-y-4">
+        <!-- Tampilan Chat: berlaku untuk semua user, preferensi disimpan di localStorage -->
+        <div>
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Ukuran Font Chat</p>
+          <div id="pulse-chat-font-size-options" class="flex flex-wrap gap-1"></div>
+          <p class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">Pratinjau:
+            <span id="pulse-chat-font-preview" class="inline-block px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200">Site 2 Semarang · 23.39 WIB · @PICWA cek</span>
+          </p>
+        </div>
+        <div>
+          <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Jenis / Nama Font Chat</p>
+          <select id="pulse-chat-font-family" class="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[12px] text-slate-800 dark:text-slate-100 focus:outline-none focus:border-orange-500"></select>
+        </div>
+        <!-- Pengelolaan grup: khusus Admin -->
+        <div id="pulse-chat-admin-sections" class="space-y-4">
         <div>
           <p id="pulse-chat-group-form-title" class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Tambah Grup Baru</p>
           <input id="pulse-chat-group-name" type="text" maxlength="40" placeholder="Nama grup (maks 40 karakter)" class="w-full px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[13px] text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-orange-500" />
@@ -1111,6 +1131,7 @@
         <div>
           <p class="text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Daftar Grup</p>
           <div id="pulse-chat-group-list" class="space-y-1"></div>
+        </div>
         </div>
       </div>
     </div>
@@ -5710,6 +5731,19 @@
     const PULSE_CHAT_MUTE_KEY = 'pulse_cho_chat_muted_v1';
     const PULSE_CHAT_MAX_LEN = 500;
     const PULSE_CHAT_EDIT_WINDOW_SEC = 120; // batas edit/hapus pesan sendiri (2 menit)
+    // Preferensi tampilan chat (disimpan di localStorage — tanpa beban server/TiDB).
+    const PULSE_CHAT_FONT_SIZE_KEY = 'pulse_cho_chat_font_size_v1';
+    const PULSE_CHAT_FONT_FAMILY_KEY = 'pulse_cho_chat_font_family_v1';
+    const PULSE_CHAT_FONT_SIZES = [6, 8, 10, 12, 14];
+    const PULSE_CHAT_DEFAULT_FONT_SIZE = 8;
+    const PULSE_CHAT_DEFAULT_FONT_FAMILY = 'system';
+    const PULSE_CHAT_FONT_FAMILIES = [
+      { key: 'system', label: 'Default Sistem (Sans-serif)', stack: "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif" },
+      { key: 'inter', label: 'Inter / Segoe UI', stack: "'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif" },
+      { key: 'roboto', label: 'Roboto', stack: "'Roboto', 'Helvetica Neue', Arial, sans-serif" },
+      { key: 'arial', label: 'Arial', stack: "Arial, Helvetica, sans-serif" },
+      { key: 'mono', label: 'Monospace / Consolas (log tiket)', stack: "'Consolas', 'JetBrains Mono', 'Courier New', monospace" }
+    ];
 
     const pulseChatState = {
       active: false,
@@ -5728,12 +5762,102 @@
       groups: [],           // daftar grup yang tersedia
       canManageGroups: false,
       editingGroupId: 0,
+      fontSize: PULSE_CHAT_DEFAULT_FONT_SIZE,
+      fontFamily: PULSE_CHAT_DEFAULT_FONT_FAMILY,
       mentionItems: [],
       mentionIndex: 0,
       pollTimer: null,
       heartbeatTimer: null,
       serverOffset: 0
     };
+
+    // ---------- Preferensi tampilan chat (ukuran & jenis font) ----------
+    function chatFontFamilyStack(key) {
+      const found = PULSE_CHAT_FONT_FAMILIES.find((f) => f.key === key);
+      return found ? found.stack : PULSE_CHAT_FONT_FAMILIES[0].stack;
+    }
+    function readChatFontSize() {
+      try {
+        const raw = Number(window.localStorage.getItem(PULSE_CHAT_FONT_SIZE_KEY));
+        if (PULSE_CHAT_FONT_SIZES.indexOf(raw) !== -1) return raw;
+      } catch (error) { /* localStorage tidak tersedia: pakai default */ }
+      return PULSE_CHAT_DEFAULT_FONT_SIZE;
+    }
+    function readChatFontFamily() {
+      try {
+        const raw = String(window.localStorage.getItem(PULSE_CHAT_FONT_FAMILY_KEY) || '');
+        if (PULSE_CHAT_FONT_FAMILIES.some((f) => f.key === raw)) return raw;
+      } catch (error) { /* localStorage tidak tersedia: pakai default */ }
+      return PULSE_CHAT_DEFAULT_FONT_FAMILY;
+    }
+    function saveChatFontPref(key, value) {
+      try { window.localStorage.setItem(key, String(value)); } catch (error) { /* abaikan */ }
+    }
+    /** Terapkan ukuran & jenis font ke seluruh kolom chat via CSS variable. */
+    function applyChatTypography() {
+      const size = Number(pulseChatState.fontSize) || PULSE_CHAT_DEFAULT_FONT_SIZE;
+      const stack = chatFontFamilyStack(pulseChatState.fontFamily);
+      const panel = document.getElementById('pulse-chat-panel');
+      if (panel) {
+        panel.style.setProperty('--pulse-chat-font-size', size + 'px');
+        panel.style.setProperty('--pulse-chat-font-family', stack);
+      }
+      const preview = document.getElementById('pulse-chat-font-preview');
+      if (preview) {
+        preview.style.fontSize = size + 'px';
+        preview.style.lineHeight = '1.25';
+        preview.style.fontFamily = stack;
+      }
+      document.querySelectorAll('#pulse-chat-font-size-options button').forEach((btn) => {
+        const active = Number(btn.dataset.size) === size;
+        btn.className = 'px-3 py-1.5 rounded-md border font-semibold transition ' + (active
+          ? 'bg-orange-500 text-white border-orange-500'
+          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-orange-400');
+      });
+      const select = document.getElementById('pulse-chat-font-family');
+      if (select) select.value = pulseChatState.fontFamily;
+    }
+    window.setChatFontSize = function setChatFontSize(size) {
+      const px = Number(size);
+      if (PULSE_CHAT_FONT_SIZES.indexOf(px) === -1) return;
+      pulseChatState.fontSize = px;
+      saveChatFontPref(PULSE_CHAT_FONT_SIZE_KEY, px);
+      applyChatTypography();
+    };
+    window.setChatFontFamily = function setChatFontFamily(key) {
+      if (!PULSE_CHAT_FONT_FAMILIES.some((f) => f.key === key)) return;
+      pulseChatState.fontFamily = key;
+      saveChatFontPref(PULSE_CHAT_FONT_FAMILY_KEY, key);
+      applyChatTypography();
+    };
+    /** Isi kontrol ukuran & jenis font di menu pengaturan (sekali saja untuk listener). */
+    function renderChatDisplaySettings() {
+      const sizeBox = document.getElementById('pulse-chat-font-size-options');
+      if (sizeBox) {
+        sizeBox.innerHTML = '';
+        PULSE_CHAT_FONT_SIZES.forEach((size) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.size = String(size);
+          btn.textContent = size + 'px';
+          btn.addEventListener('click', () => window.setChatFontSize(size));
+          sizeBox.appendChild(btn);
+        });
+      }
+      const select = document.getElementById('pulse-chat-font-family');
+      if (select && !select.dataset.ready) {
+        select.innerHTML = '';
+        PULSE_CHAT_FONT_FAMILIES.forEach((family) => {
+          const opt = document.createElement('option');
+          opt.value = family.key;
+          opt.textContent = family.label;
+          select.appendChild(opt);
+        });
+        select.dataset.ready = '1';
+        select.addEventListener('change', () => window.setChatFontFamily(select.value));
+      }
+      applyChatTypography();
+    }
 
     /** Kunci room sisi klien: 'group:<id>' atau 'dm:<peer>'. */
     function chatRoomKey(peer, groupId) {
@@ -6011,12 +6135,12 @@
         bar.appendChild(btn);
       });
     }
-    /** Tampilkan tombol gear hanya bila user berhak mengelola grup (Admin). */
+    /** Tombol gear tampil untuk semua user (pengaturan font); pengelolaan grup khusus Admin. */
     function updateChatSettingsButton() {
       const btn = document.getElementById('pulse-chat-settings-btn');
       if (!btn) return;
-      btn.classList.toggle('hidden', !pulseChatState.canManageGroups);
-      btn.classList.toggle('flex', Boolean(pulseChatState.canManageGroups));
+      btn.classList.remove('hidden');
+      btn.classList.add('flex');
     }
     /** Susun tampilan tab aktif (percakapan vs daftar user). */
     function renderChatLayout() {
@@ -6556,16 +6680,18 @@
       renderChatGroups();
     }
     window.openChatSettings = function openChatSettings() {
-      if (!pulseChatState.canManageGroups) {
-        window.showToast('Hanya Admin yang dapat mengelola grup chat.', 'error');
-        return;
-      }
       const modal = document.getElementById('pulse-chat-settings-modal');
       if (!modal) return;
+      // Bagian pengelolaan grup hanya terlihat oleh Admin; pengaturan font untuk semua user.
+      const adminSections = document.getElementById('pulse-chat-admin-sections');
+      if (adminSections) adminSections.classList.toggle('hidden', !pulseChatState.canManageGroups);
       modal.classList.remove('hidden');
       modal.classList.add('flex');
-      resetChatGroupForm();
-      renderChatGroupList();
+      renderChatDisplaySettings();
+      if (pulseChatState.canManageGroups) {
+        resetChatGroupForm();
+        renderChatGroupList();
+      }
     };
     window.closeChatSettings = function closeChatSettings() {
       const modal = document.getElementById('pulse-chat-settings-modal');
@@ -6826,6 +6952,11 @@
       if (!session || !session.username) return;
       pulseChatState.muted = readChatMutePref();
       updateChatMuteUI();
+      // Terapkan preferensi tampilan chat (ukuran & jenis font) dari localStorage.
+      pulseChatState.fontSize = readChatFontSize();
+      pulseChatState.fontFamily = readChatFontFamily();
+      applyChatTypography();
+      renderChatDisplaySettings();
       const root = document.getElementById('pulse-chat-root');
       if (root) {
         root.classList.remove('hidden');
