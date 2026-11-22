@@ -72,6 +72,7 @@ try {
             'username' => $account['username'],
         ]);
         pulseSetSessionCookie($token, PULSE_SESSION_TTL_SECONDS);
+        pulseLogActivity($pdo, (string) $account['username'], 'login', 'Login berhasil');
         // Cookie dari setcookie() baru terbaca di request berikutnya, jadi jangan
         // memanggil pulseCurrentUser() di sini — pakai data akun yang sudah diverifikasi.
         pulseRespond(['ok' => true, 'user' => [
@@ -86,8 +87,17 @@ try {
         pulseRequireAllowedOrigin();
         $token = (string) ($_COOKIE[PULSE_SESSION_COOKIE] ?? '');
         if ($token !== '') {
+            $tokenHash = hash('sha256', $token);
+            $lookup = $pdo->prepare(
+                'SELECT username FROM pulse_sessions WHERE token_hash = :token_hash LIMIT 1'
+            );
+            $lookup->execute(['token_hash' => $tokenHash]);
+            $logoutUser = (string) ($lookup->fetchColumn() ?: '');
             $statement = $pdo->prepare('DELETE FROM pulse_sessions WHERE token_hash = :token_hash');
-            $statement->execute(['token_hash' => hash('sha256', $token)]);
+            $statement->execute(['token_hash' => $tokenHash]);
+            if ($logoutUser !== '') {
+                pulseLogActivity($pdo, $logoutUser, 'logout', 'Logout sesi');
+            }
         }
         pulseSetSessionCookie('', -3600);
         pulseRespond(['ok' => true]);
@@ -105,6 +115,89 @@ try {
              FROM pulse_users WHERE is_active = 1 ORDER BY username'
         )->fetchAll();
         pulseRespond(['users' => $users]);
+    }
+
+    if ($action === 'activity' && $method === 'GET') {
+        $currentUser = pulseCurrentUser($pdo);
+        pulseRequireAdmin($currentUser);
+
+        $users = $pdo->query(
+            'SELECT username, full_name AS namaLengkap, role, site
+             FROM pulse_users WHERE is_active = 1 ORDER BY username'
+        )->fetchAll();
+
+        // Ringkasan log: waktu login terakhir, aktivitas terakhir, dan status sesi.
+        // Semua query log bersifat best-effort agar endpoint tetap berfungsi
+        // meskipun tabel log belum tersedia.
+        $logMap = [];
+        $typeMap = [];
+        $sessionMap = [];
+        try {
+            pulseEnsureActivityLog($pdo);
+            $logStatement = $pdo->query(
+                "SELECT username,
+                        MAX(CASE WHEN activity = 'login' THEN created_at END) AS last_login,
+                        MAX(created_at) AS last_activity
+                 FROM pulse_activity_log
+                 GROUP BY username"
+            );
+            foreach ($logStatement->fetchAll() as $row) {
+                $logMap[(string) $row['username']] = $row;
+            }
+
+            $typeStatement = $pdo->query(
+                'SELECT a.username, a.activity
+                 FROM pulse_activity_log a
+                 JOIN (
+                     SELECT username, MAX(created_at) AS max_at
+                     FROM pulse_activity_log GROUP BY username
+                 ) m ON m.username = a.username AND a.created_at = m.max_at'
+            );
+            foreach ($typeStatement->fetchAll() as $row) {
+                $typeMap[(string) $row['username']] = (string) $row['activity'];
+            }
+        } catch (Throwable $error) {
+            error_log('Pulse activity summary: ' . $error->getMessage());
+        }
+
+        try {
+            $sessionStatement = $pdo->query(
+                'SELECT username, COUNT(*) AS active_sessions, MAX(expires_at) AS active_until
+                 FROM pulse_sessions
+                 WHERE expires_at > UTC_TIMESTAMP()
+                 GROUP BY username'
+            );
+            foreach ($sessionStatement->fetchAll() as $row) {
+                $sessionMap[(string) $row['username']] = $row;
+            }
+        } catch (Throwable $error) {
+            error_log('Pulse activity sessions: ' . $error->getMessage());
+        }
+
+        $activity = [];
+        foreach ($users as $user) {
+            $username = (string) $user['username'];
+            $log = $logMap[$username] ?? null;
+            $session = $sessionMap[$username] ?? null;
+            $activeSessions = $session ? (int) $session['active_sessions'] : 0;
+            $activity[] = [
+                'username' => $username,
+                'namaLengkap' => (string) $user['namaLengkap'],
+                'role' => (string) $user['role'],
+                'site' => (string) $user['site'],
+                'lastLoginAt' => $log ? pulseIsoTime($log['last_login']) : null,
+                'lastActivityAt' => $log ? pulseIsoTime($log['last_activity']) : null,
+                'lastActivity' => $typeMap[$username] ?? null,
+                'activeSessions' => $activeSessions,
+                'sessionStatus' => $activeSessions > 0 ? 'Aktif' : 'Tidak Aktif',
+                'sessionUntil' => $session ? pulseIsoTime($session['active_until']) : null,
+            ];
+        }
+
+        pulseRespond([
+            'activity' => $activity,
+            'generatedAt' => gmdate('Y-m-d\TH:i:s\Z'),
+        ]);
     }
 
     if ($action === 'users' && in_array($method, ['POST', 'PUT', 'DELETE'], true)) {

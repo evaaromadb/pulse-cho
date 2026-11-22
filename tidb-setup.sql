@@ -50,3 +50,16 @@ CREATE TABLE IF NOT EXISTS pulse_auth_attempts (
   locked_until TIMESTAMP NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+
+-- Riwayat aktivitas login/logout (untuk menu Last Activity).
+-- Tabel ini juga dibuat otomatis saat runtime bila belum ada.
+CREATE TABLE IF NOT EXISTS pulse_activity_log (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(64) NOT NULL,
+  activity VARCHAR(32) NOT NULL,
+  detail VARCHAR(255) NULL,
+  ip_address VARCHAR(64) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_pulse_activity_user_time (username, created_at),
+  INDEX idx_pulse_activity_time (created_at)
+);

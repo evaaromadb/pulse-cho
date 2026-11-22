@@ -233,6 +233,80 @@ function pulseRequireAdmin(array $user): void
     }
 }
 
+/**
+ * Pastikan tabel log aktivitas tersedia (idempotent, aman bila dijalankan berulang).
+ * Dibuat otomatis saat runtime agar tidak wajib menjalankan migrasi manual.
+ */
+function pulseEnsureActivityLog(PDO $pdo): void
+{
+    static $ensured = false;
+    if ($ensured) {
+        return;
+    }
+    $ensured = true;
+    try {
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS pulse_activity_log (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(64) NOT NULL,
+                activity VARCHAR(32) NOT NULL,
+                detail VARCHAR(255) NULL,
+                ip_address VARCHAR(64) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_pulse_activity_user_time (username, created_at),
+                INDEX idx_pulse_activity_time (created_at)
+            )'
+        );
+    } catch (Throwable $error) {
+        // Kegagalan di sini tidak boleh menghentikan alur login/logout.
+        error_log('Pulse activity log init: ' . $error->getMessage());
+    }
+}
+
+/**
+ * Catat satu baris aktivitas (login/logout). Selalu best-effort:
+ * kegagalan penulisan log tidak boleh memblokir autentikasi.
+ */
+function pulseLogActivity(PDO $pdo, string $username, string $activity, string $detail = ''): void
+{
+    $username = trim($username);
+    if ($username === '') {
+        return;
+    }
+    try {
+        pulseEnsureActivityLog($pdo);
+        $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+        $statement = $pdo->prepare(
+            'INSERT INTO pulse_activity_log (username, activity, detail, ip_address)
+             VALUES (:username, :activity, :detail, :ip_address)'
+        );
+        $statement->execute([
+            'username' => substr($username, 0, 64),
+            'activity' => substr($activity, 0, 32),
+            'detail' => $detail === '' ? null : substr($detail, 0, 255),
+            'ip_address' => $ip === '' ? null : substr($ip, 0, 64),
+        ]);
+    } catch (Throwable $error) {
+        error_log('Pulse activity log write: ' . $error->getMessage());
+    }
+}
+
+/**
+ * Ubah datetime UTC dari TiDB menjadi ISO-8601 (…Z) untuk dikonsumsi browser.
+ */
+function pulseIsoTime(?string $value): ?string
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        return null;
+    }
+    $timestamp = strtotime(substr($value, 0, 19) . ' UTC');
+    if ($timestamp === false) {
+        return null;
+    }
+    return gmdate('Y-m-d\TH:i:s\Z', $timestamp);
+}
+
 function pulseSetSessionCookie(string $token, int $maxAge): void
 {
     $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));

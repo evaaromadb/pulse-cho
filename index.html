@@ -451,6 +451,43 @@
     html:not(.dark) main .bg-amber-500 {
       color: #ffffff !important;
     }
+
+    /* --- Modal Last Activity (mode terang) --- */
+    html:not(.dark) #activity-modal {
+      background-color: rgba(15, 23, 42, 0.4) !important;
+      color-scheme: light;
+    }
+    html:not(.dark) #activity-modal :is(.bg-slate-600, .bg-slate-700, .bg-slate-700\/60, .bg-slate-800, .bg-slate-800\/80, .bg-slate-800\/70, .bg-slate-900, .bg-slate-950, .bg-slate-950\/90, .bg-slate-950\/85, .bg-slate-950\/80) {
+      background-color: #ffffff !important;
+      border-color: #cbd5e1 !important;
+    }
+    html:not(.dark) #activity-modal :is(.text-white, .text-slate-100, .text-slate-200, .text-slate-300) {
+      color: #1e293b !important;
+    }
+    html:not(.dark) #activity-modal :is(.text-slate-400, .text-slate-500) {
+      color: #64748b !important;
+    }
+    html:not(.dark) #activity-modal :is(.border-slate-600, .border-slate-700, .border-slate-800, .border-slate-800\/80, .divide-slate-800\/80) {
+      border-color: #cbd5e1 !important;
+    }
+    html:not(.dark) #activity-modal .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]) {
+      border-color: #e2e8f0 !important;
+    }
+    html:not(.dark) #activity-modal table {
+      color: #1e293b !important;
+    }
+    html:not(.dark) #activity-modal thead {
+      background-color: #f1f5f9 !important;
+    }
+    html:not(.dark) #activity-modal .text-orange-300 {
+      color: #c2410c !important;
+    }
+    html:not(.dark) #activity-modal .text-sky-300 {
+      color: #0369a1 !important;
+    }
+    html:not(.dark) #activity-modal .text-emerald-300 {
+      color: #047857 !important;
+    }
   </style>
   <script>
     // =========================================================================
@@ -635,6 +672,12 @@
       if (userMgmtBtn) {
         userMgmtBtn.classList.toggle('hidden', !isAdmin);
       }
+
+      // Show Last Activity button for Admin
+      const activityBtn = document.getElementById('open-activity-btn');
+      if (activityBtn) {
+        activityBtn.classList.toggle('hidden', !isAdmin);
+      }
     };
 
     window.applyAuthenticatedSession = function applyAuthenticatedSession(sessionObj, silent = false) {
@@ -647,6 +690,11 @@
       }
 
       window.syncRolePermissionsUI();
+
+      // Terapkan Fokus Utama otomatis sesuai Site user (dapat diubah manual setelahnya)
+      if (typeof window.applyDefaultFocusForUser === 'function') {
+        window.applyDefaultFocusForUser(sessionObj);
+      }
 
       if (!silent && typeof showToast === 'function') {
         showToast(`Selamat datang, ${sessionObj.namaLengkap || sessionObj.username} [${sessionObj.role} — ${sessionObj.site}]!`, 'success');
@@ -780,9 +828,10 @@
        TOP NAVIGATION HEADER (PAGE TABS + GLOBAL CONTROLS + USER/RBAC)
        ===================================================================== -->
   <header class="sticky top-0 z-30 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md">
-    <div class="max-w-[1600px] mx-auto px-3 sm:px-5 py-2 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2">
-      <!-- Brand Identity + Page Switcher + Mobile Quick Buttons -->
-      <div class="flex flex-wrap items-center justify-between gap-2 w-full xl:w-auto">
+    <div class="max-w-[1600px] mx-auto px-3 sm:px-5 py-2.5 flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between xl:gap-3">
+
+      <!-- Baris 1: Brand Identity + Tombol Cepat Mobile -->
+      <div class="flex items-center justify-between gap-2 w-full xl:w-auto xl:shrink-0">
         <div class="flex items-center gap-2.5 min-w-0">
           <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 via-orange-500 to-amber-500 flex items-center justify-center text-white font-extrabold text-sm shadow-md shrink-0">
             PC
@@ -795,18 +844,6 @@
             <p class="text-[10px] text-slate-400 hidden sm:block truncate">E-CARE, Call Center &amp; Eskalasi Grapari</p>
           </div>
         </div>
-
-        <!-- Page Navigation Tabs -->
-        <nav class="inline-flex items-center p-0.5 rounded-xl bg-slate-950/90 border border-slate-700 text-xs">
-          <button id="nav-tab-DASHBOARD" type="button" onclick="switchActivePage('DASHBOARD')"
-            class="px-3 py-1.5 rounded-lg font-bold bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm transition cursor-pointer">
-            Dashboard KPI
-          </button>
-          <button id="nav-tab-GRAPARI" type="button" onclick="switchActivePage('GRAPARI')"
-            class="px-3 py-1.5 rounded-lg font-semibold text-slate-300 hover:text-white transition cursor-pointer">
-            Report Eskalasi Grapari
-          </button>
-        </nav>
 
         <!-- Mobile Quick Theme & Logout -->
         <div class="flex xl:hidden items-center gap-1.5 shrink-0">
@@ -822,8 +859,20 @@
         </div>
       </div>
 
-      <!-- Global Controls & Actions -->
-      <div class="flex flex-wrap items-center gap-1.5 w-full xl:w-auto">
+      <!-- Baris 2: Page Navigation Tabs (full-width di layar kecil) -->
+      <nav class="flex items-stretch gap-1 p-1 rounded-xl bg-slate-950/90 border border-slate-700 text-xs w-full xl:w-auto xl:shrink-0">
+        <button id="nav-tab-DASHBOARD" type="button" onclick="switchActivePage('DASHBOARD')"
+          class="flex-1 xl:flex-none text-center px-3 py-1.5 rounded-lg font-bold bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm transition cursor-pointer whitespace-nowrap">
+          Dashboard KPI
+        </button>
+        <button id="nav-tab-GRAPARI" type="button" onclick="switchActivePage('GRAPARI')"
+          class="flex-1 xl:flex-none text-center px-3 py-1.5 rounded-lg font-semibold text-slate-300 hover:text-white transition cursor-pointer whitespace-nowrap">
+          Report Eskalasi Grapari
+        </button>
+      </nav>
+
+      <!-- Baris 3: Global Controls & Actions -->
+      <div class="flex flex-wrap items-center gap-1.5 w-full xl:w-auto xl:justify-end">
         <!-- Upload Open & Closed Button (Admin Only) -->
         <button type="button" id="header-upload-btn" onclick="window.triggerFileUploadDialog()"
           class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
@@ -838,7 +887,8 @@
 
         <!-- Global Site Selector -->
         <select id="global-site-filter" onchange="handleGlobalSiteFilterChange(this.value)"
-          class="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-semibold text-white focus:outline-none focus:border-orange-400 cursor-pointer min-w-[125px]">
+          class="px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 text-xs font-semibold text-white focus:outline-none focus:border-orange-400 cursor-pointer min-w-[125px]"
+          title="Fokus Utama Site">
           <option value="ALL">Semua Site (Fokus S2)</option>
           <option value="SITE_2">Site 2 Semarang</option>
           <option value="SITE_1">Site 1 Bandung</option>
@@ -871,6 +921,13 @@
           <span>Export</span>
         </button>
 
+        <!-- Last Activity Button (Admin Only) -->
+        <button id="open-activity-btn" type="button" onclick="openActivityModal()"
+          class="hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
+          title="Lihat riwayat aktivitas login & status sesi user">
+          <span>🕑 Aktivitas</span>
+        </button>
+
         <!-- User Management Button (Admin Only) -->
         <button id="open-user-mgmt-btn" type="button" onclick="openUserManagementModal()"
           class="hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
@@ -887,7 +944,7 @@
         </button>
 
         <!-- Desktop User Badge & Logout -->
-        <div class="hidden xl:flex items-center gap-1.5 pl-1 border-l border-slate-700">
+        <div class="hidden xl:flex items-center gap-1.5 pl-1.5 border-l border-slate-700">
           <span id="active-user-badge" class="px-2 py-1 rounded-md bg-slate-800 border border-slate-600 text-[11px] font-mono text-slate-200">
             Eva Aroma Fitriawan (Admin)
           </span>
@@ -1624,6 +1681,51 @@
               </tr>
             </thead>
             <tbody id="user-mgmt-tbody" class="divide-y divide-slate-800/80"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       LAST ACTIVITY MODAL (ADMIN ONLY)
+       ===================================================================== -->
+  <div id="activity-modal" class="hidden fixed inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6">
+    <div class="w-full max-w-5xl max-h-[92vh] rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+      <div class="px-4 py-3 bg-slate-950/85 border-b border-slate-800 flex items-center justify-between gap-2">
+        <div>
+          <h4 class="text-sm sm:text-base font-extrabold text-white">Riwayat Aktivitas User (Last Activity)</h4>
+          <p class="text-xs text-slate-400">Berdasarkan data login user: username/NIK, role/site, waktu login terakhir &amp; status sesi.</p>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button type="button" onclick="renderActivityTable()"
+            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer">
+            ⟳ Muat Ulang
+          </button>
+          <button type="button" onclick="closeActivityModal()"
+            class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer">
+            Tutup ✕
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-auto flex-1 p-4 space-y-3">
+        <div id="activity-meta" class="text-[11px] font-mono text-slate-400"></div>
+        <div class="overflow-x-auto rounded-xl border border-slate-800">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="bg-slate-950/90 text-slate-300 border-b border-slate-800 font-semibold">
+                <th class="py-2 px-3">Username (NIK)</th>
+                <th class="py-2 px-3">Nama Lengkap</th>
+                <th class="py-2 px-3">Role</th>
+                <th class="py-2 px-3">Site</th>
+                <th class="py-2 px-3">Login Terakhir</th>
+                <th class="py-2 px-3">Aktivitas Terakhir</th>
+                <th class="py-2 px-3 text-center">Status Sesi</th>
+                <th class="py-2 px-3 text-right">Sesi Aktif</th>
+              </tr>
+            </thead>
+            <tbody id="activity-tbody" class="divide-y divide-slate-800/80"></tbody>
           </table>
         </div>
       </div>
@@ -2532,18 +2634,21 @@
       const grapariEl = document.getElementById('page-grapari-view');
       const btnDash = document.getElementById('nav-tab-DASHBOARD');
       const btnGrapari = document.getElementById('nav-tab-GRAPARI');
+      const navBase = 'flex-1 xl:flex-none text-center px-3 py-1.5 rounded-lg transition cursor-pointer whitespace-nowrap';
+      const navActive = `${navBase} font-bold bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm`;
+      const navIdle = `${navBase} font-semibold text-slate-300 hover:text-white`;
 
       if (activePageView === 'GRAPARI') {
         dashEl?.classList.add('hidden');
         grapariEl?.classList.remove('hidden');
-        if (btnGrapari) btnGrapari.className = 'px-3 py-1.5 rounded-lg font-bold bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm transition cursor-pointer';
-        if (btnDash) btnDash.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-300 hover:text-white transition cursor-pointer';
+        if (btnGrapari) btnGrapari.className = navActive;
+        if (btnDash) btnDash.className = navIdle;
         renderGrapariEscalationPage();
       } else {
         grapariEl?.classList.add('hidden');
         dashEl?.classList.remove('hidden');
-        if (btnDash) btnDash.className = 'px-3 py-1.5 rounded-lg font-bold bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm transition cursor-pointer';
-        if (btnGrapari) btnGrapari.className = 'px-3 py-1.5 rounded-lg font-semibold text-slate-300 hover:text-white transition cursor-pointer';
+        if (btnDash) btnDash.className = navActive;
+        if (btnGrapari) btnGrapari.className = navIdle;
         renderFullDashboard();
       }
     };
@@ -3347,6 +3452,29 @@
     // =========================================================================
     // 6. GLOBAL & SECTION FILTER HANDLERS
     // =========================================================================
+
+    // Tentukan Fokus Utama awal berdasarkan Site user yang login.
+    // User Site 1 Bandung -> Fokus Utama Site 1 Bandung.
+    // Selain Bandung -> tetap default Fokus Utama Site 2 Semarang ("Semua Site (Fokus S2)").
+    window.resolveDefaultFocusKey = function resolveDefaultFocusKey(site) {
+      const normalized = String(site || '').toLowerCase();
+      return normalized.includes('bandung') ? 'SITE_1' : 'ALL';
+    };
+
+    window.applyDefaultFocusForUser = function applyDefaultFocusForUser(session) {
+      if (!session) return;
+      const focusKey = window.resolveDefaultFocusKey(session.site);
+      globalSiteFilter = focusKey;
+      const selectEl = document.getElementById('global-site-filter');
+      if (selectEl) selectEl.value = focusKey;
+      const cardS2 = document.getElementById('card-site-2');
+      const cardS1 = document.getElementById('card-site-1');
+      if (cardS2 && cardS1) {
+        cardS2.classList.toggle('opacity-50', focusKey === 'SITE_1');
+        cardS1.classList.toggle('opacity-50', focusKey === 'SITE_2');
+      }
+    };
+
     window.handleGlobalSiteFilterChange = function handleGlobalSiteFilterChange(val) {
       globalSiteFilter = val;
       const cardS2 = document.getElementById('card-site-2');
@@ -4579,6 +4707,79 @@
           </td>
         </tr>
       `).join('');
+    };
+
+    // Last Activity Modal Handlers (Admin Only)
+    window.openActivityModal = function openActivityModal() {
+      if (!window.isCurrentUserAdmin()) {
+        window.showToast('Akses ditolak: Hanya Role Admin yang dapat melihat riwayat aktivitas user.', 'error');
+        return;
+      }
+      document.getElementById('activity-modal')?.classList.remove('hidden');
+      window.renderActivityTable();
+    };
+
+    window.closeActivityModal = function closeActivityModal() {
+      document.getElementById('activity-modal')?.classList.add('hidden');
+    };
+
+    function formatActivityTime(isoString) {
+      if (!isoString) return '—';
+      const dt = new Date(isoString);
+      if (Number.isNaN(dt.getTime())) return '—';
+      return dt.toLocaleString('id-ID', {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    window.renderActivityTable = async function renderActivityTable() {
+      const tbody = document.getElementById('activity-tbody');
+      const meta = document.getElementById('activity-meta');
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="8" class="py-4 px-3 text-center text-slate-400">Memuat riwayat aktivitas...</td></tr>';
+      if (meta) meta.textContent = '';
+
+      let rows = [];
+      let generatedAt = null;
+      try {
+        const response = await window.pulseAuthRequest('activity');
+        rows = Array.isArray(response.activity) ? response.activity : [];
+        generatedAt = response.generatedAt || null;
+      } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-4 px-3 text-center text-red-300">${escapeHtmlAttr(error.message || 'Gagal memuat riwayat aktivitas.')}</td></tr>`;
+        return;
+      }
+
+      if (meta) meta.textContent = `Total ${rows.length} akun • Dimuat: ${formatActivityTime(generatedAt)}`;
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="py-4 px-3 text-center text-slate-400">Belum ada data user.</td></tr>';
+        return;
+      }
+
+      const activityLabel = { login: 'Login', logout: 'Logout' };
+      tbody.innerHTML = rows.map(u => {
+        const isActive = u.sessionStatus === 'Aktif';
+        const statusBadge = isActive
+          ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Aktif</span>'
+          : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-700/60 text-slate-300 border border-slate-600">Tidak Aktif</span>';
+        const lastActivityCell = u.lastActivity
+          ? `<span class="font-semibold">${escapeHtmlAttr(activityLabel[u.lastActivity] || u.lastActivity)}</span><br><span class="text-[10px] text-slate-400">${formatActivityTime(u.lastActivityAt)}</span>`
+          : '<span class="text-slate-400">—</span>';
+        return `
+        <tr class="hover:bg-slate-800/45">
+          <td class="py-2 px-3 font-mono font-bold text-orange-300">${escapeHtmlAttr(u.username)}</td>
+          <td class="py-2 px-3 font-semibold text-white">${escapeHtmlAttr(u.namaLengkap)}</td>
+          <td class="py-2 px-3">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'Admin' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : 'bg-sky-500/20 text-sky-300 border border-sky-500/40'}">${escapeHtmlAttr(u.role)}</span>
+          </td>
+          <td class="py-2 px-3 text-slate-300">${escapeHtmlAttr(u.site)}</td>
+          <td class="py-2 px-3 font-mono text-slate-200">${formatActivityTime(u.lastLoginAt)}</td>
+          <td class="py-2 px-3 text-slate-200">${lastActivityCell}</td>
+          <td class="py-2 px-3 text-center">${statusBadge}</td>
+          <td class="py-2 px-3 text-right font-mono text-slate-200">${Number(u.activeSessions) || 0}</td>
+        </tr>`;
+      }).join('');
     };
 
     // =========================================================================
