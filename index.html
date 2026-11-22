@@ -859,6 +859,11 @@
       if (!silent && typeof showToast === 'function') {
         showToast(`Selamat datang, ${sessionObj.namaLengkap || sessionObj.username} [${sessionObj.role} — ${sessionObj.site}]!`, 'success');
       }
+
+      // Aktifkan Live Chat ringan untuk user yang sudah login
+      if (typeof window.startPulseChat === 'function') {
+        window.startPulseChat();
+      }
     };
 
     window.handleLoginSubmit = async function handleLoginSubmit(event) {
@@ -887,6 +892,9 @@
     };
 
     window.logoutSession = async function logoutSession() {
+      if (typeof window.stopPulseChat === 'function') {
+        window.stopPulseChat();
+      }
       try {
         await window.pulseAuthRequest('logout', { method: 'POST', body: '{}' });
       } catch (error) {
@@ -932,6 +940,37 @@
        TOAST NOTIFICATION CONTAINER
        ===================================================================== -->
   <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
+
+  <!-- =====================================================================
+       FLOATING LIVE CHAT WIDGET (antar-user aktif)
+       ===================================================================== -->
+  <div id="pulse-chat-root" class="hidden fixed bottom-4 right-4 z-40 flex-col items-end gap-3 pointer-events-none">
+    <!-- Panel Chat -->
+    <div id="pulse-chat-panel" class="hidden pointer-events-auto w-[19rem] sm:w-80 max-h-[70vh] flex-col rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl overflow-hidden">
+      <div class="flex items-center gap-2 px-3 py-2.5 bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white">
+        <span class="text-base leading-none">💬</span>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold leading-tight truncate">Live Chat CHO</p>
+          <p id="pulse-chat-status" class="text-[10px] text-white/85 leading-tight truncate">Menghubungkan...</p>
+        </div>
+        <button type="button" id="pulse-chat-mute-btn" onclick="toggleChatSound()" title="Bisukan suara" class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center text-sm transition">🔔</button>
+        <button type="button" onclick="toggleChatWindow()" title="Tutup" class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center text-sm transition">✕</button>
+      </div>
+      <div id="pulse-chat-messages" class="flex-1 overflow-y-auto px-3 py-2 space-y-2 bg-slate-50 dark:bg-slate-950/60"></div>
+      <form id="pulse-chat-form" onsubmit="return sendChatMessage(event)" class="p-2 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div class="flex items-end gap-2">
+          <textarea id="pulse-chat-input" rows="1" maxlength="500" placeholder="Tulis pesan..." class="flex-1 resize-none px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-orange-500"></textarea>
+          <button type="submit" class="shrink-0 w-9 h-9 rounded-xl bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center transition disabled:opacity-50" title="Kirim">➤</button>
+        </div>
+        <p id="pulse-chat-counter" class="text-right text-[10px] text-slate-400 mt-1">0/500</p>
+      </form>
+    </div>
+    <!-- Tombol Chat Mengambang + Badge Unread -->
+    <button type="button" id="pulse-chat-toggle" onclick="toggleChatWindow()" title="Live Chat" class="pointer-events-auto relative w-12 h-12 rounded-full bg-gradient-to-br from-red-600 via-orange-500 to-amber-500 text-white shadow-2xl flex items-center justify-center text-xl hover:scale-105 transition">
+      💬
+      <span id="pulse-chat-badge" class="hidden absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 border-2 border-white dark:border-slate-900 text-[10px] font-bold text-white flex items-center justify-center">0</span>
+    </button>
+  </div>
 
   <!-- =====================================================================
        SERVER-AUTHENTICATED LOGIN GATE
@@ -5517,6 +5556,362 @@
     } else {
       initPulseChoApp();
     }
+  </script>
+  <script>
+    // =========================================================================
+    // LIVE CHAT RINGAN (polling 8 detik, hanya saat login & tab aktif)
+    // =========================================================================
+    const PULSE_CHAT_POLL_MS = 8000;
+    const PULSE_CHAT_MUTE_KEY = 'pulse_cho_chat_muted_v1';
+    const PULSE_CHAT_MAX_LEN = 500;
+
+    const pulseChatState = {
+      active: false,
+      open: false,
+      fetching: false,
+      sending: false,
+      muted: false,
+      unread: 0,
+      lastId: 0,
+      pollTimer: null
+    };
+
+    // ---------- Web Audio API: nada "ding" pendek (~0.25s), tanpa file eksternal ----------
+    let pulseChatAudioCtx = null;
+    function pulseChatUnlockAudio() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!pulseChatAudioCtx) pulseChatAudioCtx = new Ctx();
+        if (pulseChatAudioCtx.state === 'suspended') {
+          pulseChatAudioCtx.resume().catch(() => {});
+        }
+      } catch (e) {}
+    }
+    function playChatDing() {
+      if (pulseChatState.muted) return;
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!pulseChatAudioCtx) pulseChatAudioCtx = new Ctx();
+        const ctx = pulseChatAudioCtx;
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1320, now + 0.06);
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(0.16, now + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.26);
+      } catch (e) {}
+    }
+
+    function readChatMutePref() {
+      try {
+        return localStorage.getItem(PULSE_CHAT_MUTE_KEY) === '1';
+      } catch (e) {
+        return false;
+      }
+    }
+    function updateChatMuteUI() {
+      const btn = document.getElementById('pulse-chat-mute-btn');
+      if (!btn) return;
+      btn.textContent = pulseChatState.muted ? '🔕' : '🔔';
+      btn.title = pulseChatState.muted ? 'Aktifkan suara' : 'Bisukan suara';
+    }
+    window.toggleChatSound = function toggleChatSound() {
+      pulseChatState.muted = !pulseChatState.muted;
+      try {
+        localStorage.setItem(PULSE_CHAT_MUTE_KEY, pulseChatState.muted ? '1' : '0');
+      } catch (e) {}
+      updateChatMuteUI();
+      if (!pulseChatState.muted) {
+        pulseChatUnlockAudio();
+        playChatDing();
+      }
+    };
+
+    // ---------- Helper tampilan ----------
+    function chatSiteLabel(site) {
+      const s = String(site || '').toLowerCase();
+      if (s.includes('bandung')) return 'Site 1 Bandung';
+      if (s.includes('semarang')) return 'Site 2 Semarang';
+      return site ? String(site) : 'Site -';
+    }
+    function formatChatTime(ts) {
+      const sec = Number(ts);
+      if (!sec) return '';
+      try {
+        const hhmm = new Date(sec * 1000).toLocaleTimeString('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+        return `${hhmm} WIB`;
+      } catch (e) {
+        return '';
+      }
+    }
+    function setChatStatus(text) {
+      const el = document.getElementById('pulse-chat-status');
+      if (el) el.textContent = text || '';
+    }
+    function updateChatBadge() {
+      const badge = document.getElementById('pulse-chat-badge');
+      if (!badge) return;
+      const n = pulseChatState.unread;
+      if (n > 0 && !pulseChatState.open) {
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+    function updateChatCounter() {
+      const input = document.getElementById('pulse-chat-input');
+      const counter = document.getElementById('pulse-chat-counter');
+      if (!counter) return;
+      const len = input ? (input.value || '').length : 0;
+      counter.textContent = `${len}/${PULSE_CHAT_MAX_LEN}`;
+    }
+    function scrollChatToBottom() {
+      const listEl = document.getElementById('pulse-chat-messages');
+      if (listEl) listEl.scrollTop = listEl.scrollHeight;
+    }
+    function buildChatMessageEl(msg, isMine) {
+      const wrap = document.createElement('div');
+      wrap.className = isMine ? 'flex flex-col items-end' : 'flex flex-col items-start';
+      const meta = document.createElement('div');
+      meta.className = 'text-[10px] text-slate-400 dark:text-slate-500 mb-0.5 px-1';
+      meta.textContent = `${msg.full_name || msg.username} · ${chatSiteLabel(msg.site)} · ${formatChatTime(msg.created_ts)}`;
+      const bubble = document.createElement('div');
+      bubble.className = isMine
+        ? 'max-w-[85%] px-3 py-2 rounded-2xl rounded-br-sm bg-orange-500 text-white text-sm whitespace-pre-wrap break-words'
+        : 'max-w-[85%] px-3 py-2 rounded-2xl rounded-bl-sm bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm whitespace-pre-wrap break-words';
+      bubble.textContent = msg.message;
+      wrap.appendChild(meta);
+      wrap.appendChild(bubble);
+      return wrap;
+    }
+    function showChatEmptyHint() {
+      const listEl = document.getElementById('pulse-chat-messages');
+      if (!listEl || listEl.querySelector('.pulse-chat-empty')) return;
+      const hint = document.createElement('p');
+      hint.className = 'pulse-chat-empty text-center text-[11px] text-slate-400 dark:text-slate-500 py-6';
+      hint.textContent = 'Belum ada pesan. Mulai percakapan dengan tim lain.';
+      listEl.appendChild(hint);
+    }
+
+    // ---------- Ambil & render pesan ----------
+    async function fetchChatMessages(options = {}) {
+      const isInitial = Boolean(options.initial);
+      if (!pulseChatState.active || pulseChatState.fetching) return;
+      pulseChatState.fetching = true;
+      try {
+        const base = (window.PULSE_API_BASE_URL || '').replace(/\/+$/, '');
+        const suffix = pulseChatState.lastId > 0 ? `?after_id=${pulseChatState.lastId}` : '';
+        const res = await fetch(`${base}/chat.php${suffix}`, { credentials: 'include' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 401) {
+            setChatStatus('Sesi berakhir');
+            window.stopPulseChat();
+            return;
+          }
+          setChatStatus('Gagal memuat pesan');
+          return;
+        }
+        setChatStatus('Terhubung');
+        const messages = Array.isArray(data.messages) ? data.messages : [];
+        if (messages.length === 0) {
+          if (isInitial) showChatEmptyHint();
+          return;
+        }
+        appendChatMessages(messages, isInitial);
+      } catch (e) {
+        setChatStatus('Koneksi terputus');
+      } finally {
+        pulseChatState.fetching = false;
+      }
+    }
+
+    function appendChatMessages(messages, isInitial) {
+      const listEl = document.getElementById('pulse-chat-messages');
+      if (!listEl) return;
+      const session = window.getCurrentSession() || {};
+      const myUsername = String(session.username || '');
+      const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 60;
+      if (isInitial) {
+        listEl.innerHTML = '';
+      } else {
+        const hint = listEl.querySelector('.pulse-chat-empty');
+        if (hint) hint.remove();
+      }
+      let newFromOthers = 0;
+      let lastId = pulseChatState.lastId;
+      messages.forEach((msg) => {
+        if (msg.id > lastId) lastId = msg.id;
+        const isMine = String(msg.username) === myUsername;
+        if (!isInitial && !isMine) newFromOthers += 1;
+        listEl.appendChild(buildChatMessageEl(msg, isMine));
+      });
+      pulseChatState.lastId = lastId;
+
+      if (newFromOthers > 0) {
+        if (!pulseChatState.open) {
+          pulseChatState.unread += newFromOthers;
+          updateChatBadge();
+        }
+        playChatDing();
+      }
+      if (isInitial || pulseChatState.open || nearBottom) scrollChatToBottom();
+    }
+
+    // ---------- Polling ----------
+    function startChatPolling() {
+      stopChatPolling();
+      pulseChatState.pollTimer = setInterval(() => {
+        if (document.hidden) return;
+        fetchChatMessages();
+      }, PULSE_CHAT_POLL_MS);
+    }
+    function stopChatPolling() {
+      if (pulseChatState.pollTimer) {
+        clearInterval(pulseChatState.pollTimer);
+        pulseChatState.pollTimer = null;
+      }
+    }
+
+    // ---------- Buka / tutup jendela ----------
+    window.toggleChatWindow = function toggleChatWindow() {
+      const panel = document.getElementById('pulse-chat-panel');
+      if (!panel) return;
+      const willOpen = panel.classList.contains('hidden');
+      if (willOpen) {
+        panel.classList.remove('hidden');
+        panel.classList.add('flex');
+        pulseChatState.open = true;
+        pulseChatState.unread = 0;
+        updateChatBadge();
+        scrollChatToBottom();
+        fetchChatMessages();
+        const input = document.getElementById('pulse-chat-input');
+        if (input) setTimeout(() => input.focus(), 60);
+      } else {
+        panel.classList.add('hidden');
+        panel.classList.remove('flex');
+        pulseChatState.open = false;
+      }
+    };
+
+    // ---------- Kirim pesan ----------
+    window.sendChatMessage = async function sendChatMessage(event) {
+      if (event) event.preventDefault();
+      const input = document.getElementById('pulse-chat-input');
+      if (!input || pulseChatState.sending) return false;
+      const text = (input.value || '').trim();
+      if (!text) return false;
+      if (text.length > PULSE_CHAT_MAX_LEN) {
+        window.showToast('Pesan maksimal 500 karakter.', 'error');
+        return false;
+      }
+      const session = window.getCurrentSession();
+      if (!session || !session.username) return false;
+
+      pulseChatState.sending = true;
+      const submitBtn = event && event.target ? event.target.querySelector('button[type="submit"]') : null;
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const base = (window.PULSE_API_BASE_URL || '').replace(/\/+$/, '');
+        const res = await fetch(`${base}/chat.php`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          window.showToast(data.error || 'Gagal mengirim pesan.', 'error');
+          return false;
+        }
+        input.value = '';
+        updateChatCounter();
+        if (data.message) {
+          const listEl = document.getElementById('pulse-chat-messages');
+          const hint = listEl ? listEl.querySelector('.pulse-chat-empty') : null;
+          if (hint) hint.remove();
+          if (listEl) listEl.appendChild(buildChatMessageEl(data.message, true));
+          if (data.message.id > pulseChatState.lastId) pulseChatState.lastId = data.message.id;
+          scrollChatToBottom();
+        }
+      } catch (e) {
+        window.showToast('Gagal mengirim pesan. Periksa koneksi.', 'error');
+      } finally {
+        pulseChatState.sending = false;
+        if (submitBtn) submitBtn.disabled = false;
+      }
+      return false;
+    };
+
+    // ---------- Lifecycle ----------
+    window.startPulseChat = function startPulseChat() {
+      const session = window.getCurrentSession();
+      if (!session || !session.username) return;
+      pulseChatState.muted = readChatMutePref();
+      updateChatMuteUI();
+      const root = document.getElementById('pulse-chat-root');
+      if (root) {
+        root.classList.remove('hidden');
+        root.classList.add('flex');
+      }
+      if (pulseChatState.active) return;
+      pulseChatState.active = true;
+      pulseChatState.lastId = 0;
+      pulseChatState.unread = 0;
+      const listEl = document.getElementById('pulse-chat-messages');
+      if (listEl) listEl.innerHTML = '';
+      updateChatBadge();
+      updateChatCounter();
+      setChatStatus('Menghubungkan...');
+      fetchChatMessages({ initial: true });
+      startChatPolling();
+    };
+
+    window.stopPulseChat = function stopPulseChat() {
+      pulseChatState.active = false;
+      pulseChatState.open = false;
+      pulseChatState.unread = 0;
+      pulseChatState.lastId = 0;
+      stopChatPolling();
+      const panel = document.getElementById('pulse-chat-panel');
+      if (panel) {
+        panel.classList.add('hidden');
+        panel.classList.remove('flex');
+      }
+      const root = document.getElementById('pulse-chat-root');
+      if (root) {
+        root.classList.add('hidden');
+        root.classList.remove('flex');
+      }
+      const listEl = document.getElementById('pulse-chat-messages');
+      if (listEl) listEl.innerHTML = '';
+      updateChatBadge();
+    };
+
+    (function initChatWidget() {
+      document.addEventListener('pointerdown', pulseChatUnlockAudio);
+      document.addEventListener('keydown', pulseChatUnlockAudio);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && pulseChatState.active) fetchChatMessages();
+      });
+      const input = document.getElementById('pulse-chat-input');
+      if (input) input.addEventListener('input', updateChatCounter);
+    })();
   </script>
 </body>
 </html>
