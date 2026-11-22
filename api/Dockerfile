@@ -1,3 +1,11 @@
+# Auto-detect untuk Render "Blueprint" (render.yaml).
+# Blueprint lama menunjuk layanan ke ./api/Dockerfile; agar build dari folder api/
+# tetap berhasil, TIDAK ada Dockerfile yang menyalin index.html di sini.
+# Dockerfile utama (menyajikan UI + API satu domain) ada di root: ../Dockerfile
+#
+# Rekomendasi: hapus layanan ini dan buat Web Service dengan
+#   Dockerfile Path = ./Dockerfile  (root repo, satu domain, tanpa CORS)
+
 FROM php:8.3-apache
 
 RUN docker-php-ext-install pdo_mysql opcache \
