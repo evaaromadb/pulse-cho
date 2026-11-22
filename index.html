@@ -778,6 +778,12 @@
         if (el) el.classList.toggle('hidden', !allowed.has(def.key));
       });
 
+      // Modal khusus Admin (Manajemen User & Aktivitas) harus tertutup penuh untuk non-Admin.
+      if (String(role || '').toLowerCase() !== 'admin') {
+        document.getElementById('user-mgmt-modal')?.classList.add('hidden');
+        document.getElementById('activity-modal')?.classList.add('hidden');
+      }
+
       // Minimal satu tab navigasi harus tetap tampil.
       const dashEl = document.getElementById('nav-tab-DASHBOARD');
       const grapariEl = document.getElementById('nav-tab-GRAPARI');
@@ -3135,7 +3141,8 @@
       const remHours = ticket.REMAINING_SL_HOURS;
       const hasFu = ticket.HAS_FU;
 
-      if (remHours < 4) return 1;
+      // Prioritas 1 hanya untuk sisa SL 0 <= sisa_jam < 4 (nilai minus/lewat batas dikecualikan).
+      if (remHours >= 0 && remHours < 4) return 1;
       if (!isOutSla && isPlatinum && !hasFu) return 2;
       if (!isOutSla && isPlatinum && hasFu) return 3;
       if (!isOutSla && !isPlatinum && !hasFu) return 4;
@@ -5003,6 +5010,11 @@
     window.renderRoleMenuMatrix = async function renderRoleMenuMatrix() {
       const container = document.getElementById('role-menu-matrix');
       if (!container) return;
+      // Pengaturan hak akses menu per role hanya boleh dilihat Admin.
+      if (!window.isCurrentUserAdmin()) {
+        container.innerHTML = '<p class="text-[11px] text-red-400">Akses ditolak: hanya Role Admin yang dapat melihat pengaturan hak akses menu.</p>';
+        return;
+      }
       container.innerHTML = '<p class="text-[11px] text-slate-400">Memuat hak akses menu...</p>';
       let cfg;
       try {
