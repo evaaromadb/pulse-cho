@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PULSE CHO — Monitoring KPI Daily &amp; Skala Prioritas Telkomsel</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='1'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%23ef4444'/%3E%3Cstop%20offset='1'%20stop-color='%23f97316'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='url%28%23g%29'/%3E%3Ctext%20x='32'%20y='44'%20font-family='Inter,Arial,sans-serif'%20font-size='30'%20font-weight='800'%20text-anchor='middle'%20fill='%23ffffff'%3EPC%3C/text%3E%3C/svg%3E" />
+  <link rel="shortcut icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='1'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%23ef4444'/%3E%3Cstop%20offset='1'%20stop-color='%23f97316'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='url%28%23g%29'/%3E%3Ctext%20x='32'%20y='44'%20font-family='Inter,Arial,sans-serif'%20font-size='30'%20font-weight='800'%20text-anchor='middle'%20fill='%23ffffff'%3EPC%3C/text%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='1'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%23ef4444'/%3E%3Cstop%20offset='1'%20stop-color='%23f97316'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='url%28%23g%29'/%3E%3Ctext%20x='32'%20y='44'%20font-family='Inter,Arial,sans-serif'%20font-size='30'%20font-weight='800'%20text-anchor='middle'%20fill='%23ffffff'%3EPC%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -336,6 +339,20 @@
     html:not(.dark) #user-mgmt-modal .bg-slate-950\/60 {
       background-color: #ffffff !important;
       border-color: #cbd5e1 !important;
+    }
+
+    /* Tombol/pill/badge AKTIF (terpilih) di Mode Terang: latar slate gelap tegas + teks putih
+       agar tidak lagi menjadi teks putih di atas latar terang/putih (kontras tinggi & terbaca) */
+    html:not(.dark) main .bg-slate-600.text-white,
+    html:not(.dark) main .bg-slate-700.text-white,
+    html:not(.dark) main .bg-slate-800.text-white {
+      background-color: #334155 !important;
+      border-color: #475569 !important;
+      color: #ffffff !important;
+    }
+    /* Cegah teks menjadi putih saat hover pill non-aktif di Mode Terang */
+    html:not(.dark) main .hover\:text-white:hover {
+      color: #0f172a !important;
     }
 
     /* --- Warna teks slate (100 - 500) dan white --- */
@@ -1688,6 +1705,21 @@
               <option value="ISL">In SLA</option>
               <option value="OSL">Out SLA</option>
             </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-2.5 mb-2.5">
+          <div class="lg:col-span-6">
+            <div class="text-[10px] font-bold tracking-wide text-orange-600 mb-1">Filter Cepat CASE_ID</div>
+            <div class="relative">
+              <input id="case-analysis-caseid" type="text" oninput="renderCaseAnalysisSection()"
+                placeholder="Ketik CASE_ID (eksak atau sebagian, otomatis abaikan besar/kecil huruf)..."
+                class="w-full px-3.5 py-2 pr-16 rounded-xl bg-slate-950 border border-orange-500/60 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-orange-500" />
+              <button type="button" onclick="clearCaseAnalysisCaseId()"
+                class="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-300 cursor-pointer">
+                Reset
+              </button>
+            </div>
           </div>
         </div>
 
@@ -4140,6 +4172,12 @@
       renderCaseAnalysisSection();
     };
 
+    window.clearCaseAnalysisCaseId = function clearCaseAnalysisCaseId() {
+      const inp = document.getElementById('case-analysis-caseid');
+      if (inp) inp.value = '';
+      renderCaseAnalysisSection();
+    };
+
     window.setKipSiteFilter = function setKipSiteFilter(site) {
       kipSiteFilter = site;
       ['ALL', 'SITE_2', 'SITE_1'].forEach(s => {
@@ -4524,6 +4562,7 @@
 
     function renderCaseAnalysisSection() {
       const kw = (document.getElementById('case-analysis-search')?.value || '').trim().toLowerCase();
+      const caseIdQuery = (document.getElementById('case-analysis-caseid')?.value || '').trim().toLowerCase();
       const fieldMode = document.getElementById('case-analysis-field')?.value || 'BOTH';
       const slaFilter = document.getElementById('ana-sla-filter')?.value || 'ALL';
 
@@ -4532,6 +4571,12 @@
         if (analysisChannelFilter !== 'ALL' && t.CHANNEL !== analysisChannelFilter) return false;
         if (slaFilter === 'ISL' && t.IS_OUT_SLA) return false;
         if (slaFilter === 'OSL' && !t.IS_OUT_SLA) return false;
+
+        // Filter CASE_ID: eksak maupun parsial/substring, case-insensitive
+        if (caseIdQuery) {
+          const cid = String(t.CASE_ID == null ? '' : t.CASE_ID).toLowerCase();
+          if (!cid.includes(caseIdQuery)) return false;
+        }
 
         if (!kw) return true;
         const t3 = t.CASE_TYPE_3.toLowerCase();
