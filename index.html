@@ -1732,6 +1732,7 @@
               <th class="py-2 px-2.5 text-right">Sisa SL / TTR</th>
               <th class="py-2 px-2.5">KIP (CASE_TYPE_3)</th>
               <th class="py-2 px-2.5">CASE_NOTES</th>
+              <th class="py-2 px-2.5 pii-col hidden">Data Pelanggan (Masked)</th>
             </tr>
           </thead>
           <tbody id="modal-tickets-tbody" class="divide-y divide-slate-800/80"></tbody>
@@ -3144,6 +3145,104 @@
       return 8;
     }
 
+    // =========================================================================
+    // PERHITUNGAN WAKTU BERBASIS JAM BERJALAN (NOW) — RTR / OSLA / PRIORITAS
+    // sisa_jam = (CASE_DUE_DATETIME - now) dalam jam
+    // =========================================================================
+    function getRemainingHours(ticket) {
+      const due = ticket.CASE_DUE_DATETIME;
+      if (due instanceof Date && !isNaN(due.getTime())) {
+        return (due.getTime() - Date.now()) / 3600000;
+      }
+      return Number(ticket.REMAINING_SL_HOURS || 0);
+    }
+
+    // Alert OSLA murni: tiket Open dengan 0 <= sisa_jam < 4 (tiket lewat batas / minus dikecualikan).
+    function isNearOslaTicket(ticket) {
+      if (!ticket || ticket.IS_CLOSED) return false;
+      const rem = getRemainingHours(ticket);
+      return rem >= 0 && rem < 4;
+    }
+
+    // Hitung ulang sisa SL & prioritas seluruh tiket memakai waktu berjalan saat ini.
+    function refreshTicketTimeMetrics() {
+      const source = allValid2MonthTickets.length > 0 ? allValid2MonthTickets : filteredTickets;
+      source.forEach(t => {
+        t.REMAINING_SL_HOURS = Number(getRemainingHours(t).toFixed(2));
+        t.PRIORITY_LEVEL = determinePriorityLevel(t);
+      });
+    }
+
+    // =========================================================================
+    // MASKING DATA SENSITIF (PII) — MSISDN / NIK / EMAIL / NAMA
+    // Nilai penuh hanya dipertahankan untuk export oleh role Admin.
+    // =========================================================================
+    const PII_FIELD_DEFS = [
+      { key: 'MSISDN', label: 'MSISDN', aliases: ['MSISDN', 'NO_MSISDN', 'NOMOR_PELANGGAN', 'NO_PELANGGAN', 'CUSTOMER_MSISDN', 'NO_HP', 'NO_HANDPHONE', 'HANDPHONE', 'PHONE', 'NO_TELP', 'NO_TELEPON', 'CONTACT_NUMBER'] },
+      { key: 'NIK', label: 'NIK', aliases: ['NIK', 'NO_KTP', 'KTP', 'NO_IDENTITAS', 'NOMOR_IDENTITAS', 'IDENTITAS'] },
+      { key: 'EMAIL', label: 'Email', aliases: ['EMAIL', 'CUSTOMER_EMAIL', 'E_MAIL', 'ALAMAT_EMAIL', 'EMAIL_PELANGGAN'] },
+      { key: 'CUSTOMER_NAME', label: 'Nama', aliases: ['CUSTOMER_NAME', 'NAMA_PELANGGAN', 'NAMA_CUSTOMER', 'NAMA_PEMILIK', 'CONTACT_NAME', 'NAMA_KONTAK'] }
+    ];
+
+    function maskDigitsMiddle(value, keepStart, keepEnd) {
+      const digits = String(value == null ? '' : value).replace(/\D/g, '');
+      if (!digits) return '****';
+      if (digits.length <= keepStart + keepEnd) {
+        return digits.slice(0, keepStart) + '*'.repeat(Math.max(1, digits.length - keepStart));
+      }
+      return digits.slice(0, keepStart) + '*'.repeat(digits.length - keepStart - keepEnd) + digits.slice(-keepEnd);
+    }
+
+    function maskMsisdn(value) { return maskDigitsMiddle(value, 5, 4); }
+    function maskNik(value) { return maskDigitsMiddle(value, 4, 4); }
+
+    function maskEmail(value) {
+      const s = String(value == null ? '' : value).trim();
+      const at = s.indexOf('@');
+      if (at <= 0) return maskPlainText(s);
+      const local = s.slice(0, at);
+      const domain = s.slice(at);
+      const keep = local.slice(0, Math.min(2, local.length));
+      return keep + '*'.repeat(Math.max(1, local.length - keep.length)) + domain;
+    }
+
+    function maskName(value) {
+      const s = String(value == null ? '' : value).trim();
+      if (!s) return '';
+      return s.split(/\s+/).map(part => (
+        part.length <= 1 ? part : part.slice(0, 1) + '*'.repeat(part.length - 1)
+      )).join(' ');
+    }
+
+    // Samarkan pola PII di dalam teks bebas (mis. CASE_NOTES).
+    function maskPlainText(value) {
+      let s = String(value == null ? '' : value);
+      if (!s) return s;
+      s = s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, m => maskEmail(m));
+      s = s.replace(/\b\d{16}\b/g, m => maskNik(m));
+      s = s.replace(/\b(?:62|0)8?\d{7,13}\b/g, m => maskMsisdn(m));
+      return s;
+    }
+
+    function renderPiiMaskedCell(ticket) {
+      const p = ticket.PII_FIELDS;
+      if (!p) return '—';
+      const parts = [];
+      if (p.MSISDN) parts.push(`MSISDN ${maskMsisdn(p.MSISDN)}`);
+      if (p.NIK) parts.push(`NIK ${maskNik(p.NIK)}`);
+      if (p.EMAIL) parts.push(maskEmail(p.EMAIL));
+      if (p.CUSTOMER_NAME) parts.push(maskName(p.CUSTOMER_NAME));
+      return parts.length ? parts.join(' • ') : '—';
+    }
+
+    // Tampilkan/sembunyikan kolom PII pada tabel drill-down sesuai ketersediaan data.
+    function applyPiiColumnVisibility() {
+      const show = Boolean(window.PULSE_HAS_PII);
+      document.querySelectorAll('#drilldown-modal .pii-col').forEach(el => {
+        el.classList.toggle('hidden', !show);
+      });
+    }
+
     function pickFirstValue(obj, keys) {
       for (const k of keys) {
         if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') {
@@ -3217,6 +3316,16 @@
 
         const lookupMatch = POOL_LOOKUP_MAP.get(rawPoolCode.toUpperCase()) || null;
 
+        // Data sensitif (PII) yang terdeteksi pada sumber data. Disimpan mentah
+        // untuk export Admin, ditampilkan tersamarkan pada UI/tabel/modal.
+        const piiFields = {};
+        PII_FIELD_DEFS.forEach(def => {
+          const val = pickFirstValue(raw, def.aliases);
+          if (val !== '' && val !== undefined && val !== null) {
+            piiFields[def.key] = String(val).trim();
+          }
+        });
+
         const ticketObj = {
           CASE_ID: String(pickFirstValue(raw, ['CASE_ID', 'CASEID', 'TICKET_ID', 'ID']) || `1-${1450000000000 + idx}`).trim(),
           UNIT_NAME: unitInfo.unit,
@@ -3246,12 +3355,15 @@
           HAS_FU: hasFu,
           TTR_HOURS: Number(ttrHours.toFixed(2)),
           REMAINING_SL_HOURS: Number(remainingSlHours.toFixed(2)),
+          PII_FIELDS: Object.keys(piiFields).length > 0 ? piiFields : null,
           PRIORITY_LEVEL: 0
         };
 
         ticketObj.PRIORITY_LEVEL = determinePriorityLevel(ticketObj);
         normalized.push(ticketObj);
       });
+
+      window.PULSE_HAS_PII = normalized.some(t => t.PII_FIELDS);
 
       allValid2MonthTickets = normalized.filter(t => t.TANGGAL >= twoMonthsAgoStart);
       if (allValid2MonthTickets.length === 0 && normalized.length > 0) {
@@ -3305,7 +3417,7 @@
           open++;
           if (!t.IS_OUT_SLA) openInSla++;
           else openOutSla++;
-          if (t.REMAINING_SL_HOURS < 4) nearOslaOpen++;
+          if (isNearOslaTicket(t)) nearOslaOpen++;
         }
       });
 
@@ -3813,6 +3925,7 @@
     // 7. RENDERERS: DASHBOARD KPI & REPORT ESKALASI GRAPARI
     // =========================================================================
     function renderFullDashboard() {
+      refreshTicketTimeMetrics();
       renderSiteScorecards();
       renderUnitBreakdownTable();
       renderPoolTable();
@@ -4213,9 +4326,9 @@
             <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
             <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
           </td>
-          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${t.REMAINING_SL_HOURS.toFixed(1)}j`}</td>
+          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${getRemainingHours(t).toFixed(1)}j`}</td>
           <td class="py-2 px-2.5 text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
-          <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(t.CASE_NOTES)}">${escapeHtmlAttr(t.CASE_NOTES)}</td>
+          <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
         </tr>
       `).join('');
     }
@@ -4452,6 +4565,7 @@
     }
 
     function renderGrapariEscalationPage() {
+      refreshTicketTimeMetrics();
       const poolTypeFilter = document.getElementById('grapari-pool-type-filter')?.value || 'Grapari';
       const searchKw = (document.getElementById('grapari-search-input')?.value || '').trim().toLowerCase();
       const onlyWithTickets = Boolean(document.getElementById('grapari-only-with-tickets')?.checked);
@@ -4613,7 +4727,7 @@
       const tbody = document.getElementById('modal-tickets-tbody');
       if (!tbody) return;
       if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-slate-400">Tidak ada tiket untuk ditampilkan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="py-6 text-center text-slate-400">Tidak ada tiket untuk ditampilkan.</td></tr>`;
         return;
       }
       tbody.innerHTML = list.slice(0, 300).map(t => {
@@ -4633,12 +4747,14 @@
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
               <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
             </td>
-            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${t.REMAINING_SL_HOURS.toFixed(1)}j`}</td>
+            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${getRemainingHours(t).toFixed(1)}j`}</td>
             <td class="py-2 px-2.5 text-slate-200 max-w-[200px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
-            <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(t.CASE_NOTES)}">${escapeHtmlAttr(t.CASE_NOTES)}</td>
+            <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
+            <td class="py-2 px-2.5 pii-col hidden text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(renderPiiMaskedCell(t))}">${escapeHtmlAttr(renderPiiMaskedCell(t))}</td>
           </tr>
         `;
       }).join('');
+      applyPiiColumnVisibility();
     }
 
     window.copyAllModalCaseIds = function copyAllModalCaseIds() {
@@ -4698,7 +4814,7 @@
       const list = base.filter(t => {
         if (poolName !== 'ALL_NEAR_OSLA' && t.POOL !== poolName) return false;
         if (filter === 'OPEN') return !t.IS_CLOSED;
-        if (filter === 'NEAR_OSLA') return !t.IS_CLOSED && t.REMAINING_SL_HOURS < 4;
+        if (filter === 'NEAR_OSLA') return isNearOslaTicket(t);
         return true;
       });
       openDrilldownModalWithTickets(`Pool: ${poolName} (${filter})`, 'Unit eskalasi', list);
@@ -4746,7 +4862,7 @@
         if (String(t.POOL_CODE || '').trim().toUpperCase() !== code) return false;
         if (mode === 'CLOSED') return t.IS_CLOSED;
         if (mode === 'OPEN') return !t.IS_CLOSED;
-        if (mode === 'NEAR_OSLA') return !t.IS_CLOSED && t.REMAINING_SL_HOURS < 4;
+        if (mode === 'NEAR_OSLA') return isNearOslaTicket(t);
         return true;
       });
       const modeLabel = mode === 'NEAR_OSLA' ? 'Alert OSLA (<4j)' : mode;
@@ -5057,25 +5173,34 @@
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoA);
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary_KPI');
 
-      const detailRows = filteredTickets.map(t => ({
-        CASE_ID: t.CASE_ID,
-        UNIT_NAME: t.UNIT_NAME,
-        SITE: t.SITE_LABEL,
-        CHANNEL: t.CHANNEL,
-        TANGGAL: t.TANGGAL_YMD,
-        CLOSE_DT: t.CLOSE_DT ? formatDateYMD(t.CLOSE_DT) : '',
-        CASE_STATUS: t.CASE_STATUS,
-        CASE_SUBSTATUS: t.CASE_SUBSTATUS,
-        SLA_STATUS: t.SLA_STATUS,
-        POOL: t.POOL_CODE || t.POOL,
-        NAMA_POOL: t.POOL_LOOKUP ? t.POOL_LOOKUP.namaPool : t.POOL,
-        POOL_DETAIL: t.POOL_LOOKUP ? t.POOL_LOOKUP.detail : t.POOL,
-        ID_REMEDY: t.ID_REMEDY,
-        PRIORITY: t.PRIORITY_LEVEL > 0 ? `P${t.PRIORITY_LEVEL}` : 'Closed',
-        TTR_HOURS: t.TTR_HOURS,
-        CASE_TYPE_3: t.CASE_TYPE_3,
-        CASE_NOTES: t.CASE_NOTES
-      }));
+      // Data sensitif (PII) diekspor penuh hanya untuk role Admin; role lain tersamarkan.
+      const canExportRawPii = window.isCurrentUserAdmin();
+      const detailRows = filteredTickets.map(t => {
+        const pii = t.PII_FIELDS || {};
+        return {
+          CASE_ID: t.CASE_ID,
+          UNIT_NAME: t.UNIT_NAME,
+          SITE: t.SITE_LABEL,
+          CHANNEL: t.CHANNEL,
+          TANGGAL: t.TANGGAL_YMD,
+          CLOSE_DT: t.CLOSE_DT ? formatDateYMD(t.CLOSE_DT) : '',
+          CASE_STATUS: t.CASE_STATUS,
+          CASE_SUBSTATUS: t.CASE_SUBSTATUS,
+          SLA_STATUS: t.SLA_STATUS,
+          POOL: t.POOL_CODE || t.POOL,
+          NAMA_POOL: t.POOL_LOOKUP ? t.POOL_LOOKUP.namaPool : t.POOL,
+          POOL_DETAIL: t.POOL_LOOKUP ? t.POOL_LOOKUP.detail : t.POOL,
+          ID_REMEDY: t.ID_REMEDY,
+          PRIORITY: t.PRIORITY_LEVEL > 0 ? `P${t.PRIORITY_LEVEL}` : 'Closed',
+          TTR_HOURS: t.TTR_HOURS,
+          CASE_TYPE_3: t.CASE_TYPE_3,
+          CASE_NOTES: canExportRawPii ? t.CASE_NOTES : maskPlainText(t.CASE_NOTES),
+          MSISDN: pii.MSISDN ? (canExportRawPii ? pii.MSISDN : maskMsisdn(pii.MSISDN)) : '',
+          NIK: pii.NIK ? (canExportRawPii ? pii.NIK : maskNik(pii.NIK)) : '',
+          EMAIL: pii.EMAIL ? (canExportRawPii ? pii.EMAIL : maskEmail(pii.EMAIL)) : '',
+          CUSTOMER_NAME: pii.CUSTOMER_NAME ? (canExportRawPii ? pii.CUSTOMER_NAME : maskName(pii.CUSTOMER_NAME)) : ''
+        };
+      });
       const wsData = XLSX.utils.json_to_sheet(detailRows);
       XLSX.utils.book_append_sheet(wb, wsData, 'Filtered_Data');
 
