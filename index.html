@@ -5098,13 +5098,26 @@
     };
 
     window.deleteUserRow = async function deleteUserRow(username) {
+      if (!window.isCurrentUserAdmin()) {
+        window.showToast('Akses ditolak: Hanya Role Admin yang dapat menghapus user.', 'error');
+        return;
+      }
       const sess = window.getCurrentSession();
       if (sess && sess.username === username) {
         window.showToast('Tidak dapat menghapus akun yang sedang aktif digunakan.', 'error');
         return;
       }
+      const payload = JSON.stringify({ username });
       try {
-        await window.pulseAuthRequest(`users&username=${encodeURIComponent(username)}`, { method: 'DELETE' });
+        try {
+          // Rute utama: DELETE users (username dikirim pada body JSON).
+          await window.pulseAuthRequest('users', { method: 'DELETE', body: payload });
+        } catch (error) {
+          // Fallback aman bila HTTP DELETE diblokir server/proxy (405/501/404).
+          const status = Number(error && error.status);
+          if (!(status === 404 || status === 405 || status === 501)) throw error;
+          await window.pulseAuthRequest('users-delete', { method: 'POST', body: payload });
+        }
         await window.renderUserManagementTable();
         window.showToast(`User ${username} berhasil dihapus.`, 'info');
       } catch (error) {

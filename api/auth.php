@@ -6,6 +6,52 @@ require __DIR__ . '/common.php';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $action = (string) ($_GET['action'] ?? '');
 
+/**
+ * Hapus akun user (khusus Admin). Dipakai oleh rute DELETE `users` maupun
+ * fallback POST `users-delete`. Menolak penghapusan akun yang sedang login
+ * dan menjaga minimal satu Admin aktif.
+ */
+function pulseHandleDeleteUser(PDO $pdo, array $currentUser, string $username): void
+{
+    $username = trim($username);
+    if ($username === '' || $username === (string) $currentUser['username']) {
+        pulseRespond(['error' => 'Tidak dapat menghapus akun yang sedang digunakan.'], 400);
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $targetStatement = $pdo->prepare(
+            'SELECT role FROM pulse_users WHERE username = :username AND is_active = 1 FOR UPDATE'
+        );
+        $targetStatement->execute(['username' => $username]);
+        $target = $targetStatement->fetch();
+        if (!$target) {
+            $pdo->rollBack();
+            pulseRespond(['error' => 'User tidak ditemukan.'], 404);
+        }
+        if (strcasecmp((string) $target['role'], 'Admin') === 0) {
+            $adminCount = (int) $pdo->query(
+                "SELECT COUNT(*) FROM pulse_users WHERE role = 'Admin' AND is_active = 1"
+            )->fetchColumn();
+            if ($adminCount <= 1) {
+                $pdo->rollBack();
+                pulseRespond(['error' => 'Minimal harus ada satu akun Admin aktif.'], 409);
+            }
+        }
+        $statement = $pdo->prepare('DELETE FROM pulse_sessions WHERE username = :username');
+        $statement->execute(['username' => $username]);
+        $statement = $pdo->prepare('DELETE FROM pulse_users WHERE username = :username');
+        $statement->execute(['username' => $username]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+    pulseRespond(['ok' => true]);
+}
+
 try {
     $pdo = pulseDatabase();
     pulseEnsureBootstrapAdmin($pdo);
@@ -206,36 +252,10 @@ try {
         pulseRequireAdmin($currentUser);
 
         if ($method === 'DELETE') {
-            $username = trim((string) ($_GET['username'] ?? ''));
-            if ($username === '' || $username === $currentUser['username']) {
-                pulseRespond(['error' => 'Tidak dapat menghapus akun yang sedang digunakan.'], 400);
-            }
-
-            $pdo->beginTransaction();
-            $targetStatement = $pdo->prepare(
-                'SELECT role FROM pulse_users WHERE username = :username AND is_active = 1 FOR UPDATE'
-            );
-            $targetStatement->execute(['username' => $username]);
-            $target = $targetStatement->fetch();
-            if (!$target) {
-                $pdo->rollBack();
-                pulseRespond(['error' => 'User tidak ditemukan.'], 404);
-            }
-            if (strcasecmp((string) $target['role'], 'Admin') === 0) {
-                $adminCount = (int) $pdo->query(
-                    "SELECT COUNT(*) FROM pulse_users WHERE role = 'Admin' AND is_active = 1"
-                )->fetchColumn();
-                if ($adminCount <= 1) {
-                    $pdo->rollBack();
-                    pulseRespond(['error' => 'Minimal harus ada satu akun Admin aktif.'], 409);
-                }
-            }
-            $statement = $pdo->prepare('DELETE FROM pulse_sessions WHERE username = :username');
-            $statement->execute(['username' => $username]);
-            $statement = $pdo->prepare('DELETE FROM pulse_users WHERE username = :username');
-            $statement->execute(['username' => $username]);
-            $pdo->commit();
-            pulseRespond(['ok' => true]);
+            // Username dikirim pada body JSON (fallback: query string).
+            $payload = pulseReadJsonBody();
+            $username = (string) ($payload['username'] ?? ($_GET['username'] ?? ''));
+            pulseHandleDeleteUser($pdo, $currentUser, $username);
         }
 
         $payload = pulseReadJsonBody();
@@ -309,6 +329,16 @@ try {
             $revokeSessions->execute(['username' => $username]);
         }
         pulseRespond(['ok' => true]);
+    }
+
+    // Fallback hapus user via POST untuk proxy/hosting yang memblokir HTTP DELETE.
+    if ($action === 'users-delete' && $method === 'POST') {
+        pulseRequireAllowedOrigin();
+        $currentUser = pulseCurrentUser($pdo);
+        pulseRequireAdmin($currentUser);
+        $payload = pulseReadJsonBody();
+        $username = (string) ($payload['username'] ?? ($_GET['username'] ?? ''));
+        pulseHandleDeleteUser($pdo, $currentUser, $username);
     }
 
     if ($action === 'role-menus' && $method === 'GET') {
