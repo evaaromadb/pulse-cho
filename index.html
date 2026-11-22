@@ -1663,6 +1663,12 @@
               <option value="Remedy Network">Remedy Network</option>
             </select>
 
+            <select id="grapari-unit-name-filter" onchange="renderGrapariEscalationPage()"
+              class="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-semibold text-white focus:outline-none focus:border-orange-500 cursor-pointer max-w-[240px]"
+              title="Filter dinamis berdasarkan UNIT_NAME (pilih 'Semua UNIT_NAME' untuk reset)">
+              <option value="ALL">Semua UNIT_NAME</option>
+            </select>
+
             <input id="grapari-search-input" type="text" oninput="renderGrapariEscalationPage()"
               placeholder="Cari kode POOL atau Pool Detail (misal: 2-3D250, Semarang, BSD)..."
               class="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-orange-500 min-w-[230px]" />
@@ -4571,16 +4577,43 @@
       return top;
     }
 
+    function getGrapariUnitNameFilterValue() {
+      return document.getElementById('grapari-unit-name-filter')?.value || 'ALL';
+    }
+
+    // Sinkronkan opsi UNIT_NAME secara dinamis (stabil: dari seluruh tiket sebelum filter UNIT_NAME diterapkan).
+    function syncGrapariUnitNameOptions(tickets) {
+      const select = document.getElementById('grapari-unit-name-filter');
+      if (!select) return 'ALL';
+      const names = Array.from(new Set(tickets
+        .map(t => String(t.UNIT_NAME || '').trim())
+        .filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, 'id'));
+      const prev = select.value || 'ALL';
+      const keep = names.indexOf(prev) !== -1 ? prev : 'ALL';
+      select.innerHTML = ['<option value="ALL">Semua UNIT_NAME</option>']
+        .concat(names.map(n => `<option value="${escapeHtmlAttr(n)}">${escapeHtmlAttr(n)}</option>`))
+        .join('');
+      select.value = keep;
+      return keep;
+    }
+
     function renderGrapariEscalationPage() {
       refreshTicketTimeMetrics();
       const poolTypeFilter = document.getElementById('grapari-pool-type-filter')?.value || 'Grapari';
       const searchKw = (document.getElementById('grapari-search-input')?.value || '').trim().toLowerCase();
       const onlyWithTickets = Boolean(document.getElementById('grapari-only-with-tickets')?.checked);
 
-      const baseTickets = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
+      const baseTicketsAll = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
         if (globalSiteFilter !== 'ALL' && t.SITE !== globalSiteFilter) return false;
         return true;
       });
+
+      // Filter UNIT_NAME (dinamis): memengaruhi tiket, metrik/ringkasan, dan tabel Report Eskalasi Grapari.
+      const unitNameFilter = syncGrapariUnitNameOptions(baseTicketsAll);
+      const baseTickets = unitNameFilter === 'ALL'
+        ? baseTicketsAll
+        : baseTicketsAll.filter(t => String(t.UNIT_NAME || '').trim() === unitNameFilter);
 
       const ticketsByCode = new Map();
       baseTickets.forEach(t => {
@@ -4864,8 +4897,10 @@
       const code = String(el.dataset.poolCode || '').trim().toUpperCase();
       const detail = el.dataset.poolDetail || code;
       const mode = el.dataset.mode || 'ALL';
+      const unitName = getGrapariUnitNameFilterValue();
       const list = getGlobalChannelFilteredTickets(filteredTickets).filter(t => {
         if (globalSiteFilter !== 'ALL' && t.SITE !== globalSiteFilter) return false;
+        if (unitName !== 'ALL' && String(t.UNIT_NAME || '').trim() !== unitName) return false;
         if (String(t.POOL_CODE || '').trim().toUpperCase() !== code) return false;
         if (mode === 'CLOSED') return t.IS_CLOSED;
         if (mode === 'OPEN') return !t.IS_CLOSED;
@@ -4873,7 +4908,8 @@
         return true;
       });
       const modeLabel = mode === 'NEAR_OSLA' ? 'Alert OSLA (<4j)' : mode;
-      openDrilldownModalWithTickets(`Eskalasi Pool ${code} — ${detail}`, `Filter: ${modeLabel}`, list);
+      const unitLabel = unitName !== 'ALL' ? ` • UNIT: ${unitName}` : '';
+      openDrilldownModalWithTickets(`Eskalasi Pool ${code} — ${detail}`, `Filter: ${modeLabel}${unitLabel}`, list);
     };
 
     // User Management Modal Handlers (Admin Only)
