@@ -1,21 +1,22 @@
 # PULSE CHO: TiDB dan Render
 
-Frontend statis tetap di `https://pulse-cho.onrender.com`; API PHP TiDB dijalankan sebagai layanan Render terpisah. Password akun di-hash dengan PHP, sesi disimpan di TiDB, dan endpoint dataset mewajibkan sesi valid. Hanya Admin yang dapat mengunggah atau menghapus dataset.
+Halaman aplikasi dan API PHP berjalan pada **satu** layanan Render (Docker) bernama `pulse-cho-v2` di `https://pulse-cho-v2.onrender.com`: `/` melayani UI dan `/api/*.php` melayani API, sehingga tidak ada CORS. Password akun di-hash dengan PHP, sesi disimpan di TiDB, dan endpoint dataset mewajibkan sesi valid. Hanya Admin yang dapat mengunggah atau menghapus dataset.
 
 ## 1. Siapkan skema TiDB
 
 Jalankan [`tidb-setup.sql`](tidb-setup.sql) melalui SQL Editor TiDB Cloud. Ini membuat tabel dataset/chunk, akun, dan sesi. Skrip aman dijalankan ulang untuk instalasi yang sudah memiliki tabel dataset.
 
-## 2. Deploy layanan API di Render
+## 2. Deploy layanan di Render
 
-Gunakan Blueprint dari repository ini dan pilih `render.yaml`. Blueprint hanya membuat layanan `pulse-cho-api`, sehingga tidak mengganti layanan frontend yang sudah ada. Jika nama layanan API Render berbeda, ubah `PULSE_API_BASE_URL` di bagian konfigurasi awal `index.html` ke URL layanan tersebut.
+Buat **Web Service** baru dari repository ini (New + > Web Service), lalu isi: Runtime **Docker**, Dockerfile Path `./Dockerfile`, Health Check Path `/api/health.php`, dan nama layanan `pulse-cho-v2` (nama ini yang dipakai `render.yaml`). Blueprint juga opsional: pilih `render.yaml`, dan Render hanya membuat layanan `pulse-cho-v2` tanpa mengubah layanan lama.
 
-Isi environment variables yang ditandai rahasia di Render:
+Isi environment variables berikut di tab **Environment**:
 
-- `PULSE_TIDB_HOST`, `PULSE_TIDB_USERNAME`, `PULSE_TIDB_PASSWORD`: kredensial MySQL TiDB Cloud yang baru.
+- `PULSE_TIDB_HOST`, `PULSE_TIDB_USERNAME`, `PULSE_TIDB_PASSWORD`: kredensial MySQL TiDB Cloud.
+- `PULSE_TIDB_PORT` = `4000` dan `PULSE_TIDB_DATABASE` = `pulse_cho`.
+- `PULSE_TIDB_CA_PATH` = `/etc/secrets/tidb-ca.pem` bila CA TiDB ditambahkan sebagai **Secret File** bernama `tidb-ca.pem`. Kosongkan bila ingin memakai CA bawaan sistem.
 - `PULSE_ADMIN_USERNAME`, `PULSE_ADMIN_PASSWORD`, `PULSE_ADMIN_NAME`, `PULSE_ADMIN_SITE`: akun Admin awal. Password minimal 12 karakter; buat nilai unik dan rahasia.
-- Tambahkan CA TiDB sebagai **Secret File** bernama `tidb-ca.pem`. Blueprint menunjuknya melalui `/etc/secrets/tidb-ca.pem`.
-- `PULSE_ALLOWED_ORIGIN` boleh berisi beberapa origin dipisah koma, mis. `https://pulse-cho.onrender.com,http://localhost,http://127.0.0.1`. API hanya mengizinkan origin yang terdaftar di sini untuk login/upload.
+- `PULSE_ALLOWED_ORIGIN` boleh dikosongkan karena UI dan API satu domain. Isi hanya bila API dipakai dari domain lain, mis. `https://contoh.com,http://localhost`.
 
 Admin awal dibuat otomatis ketika tabel user masih kosong. Akun dan password lama yang tersimpan di browser tidak dimigrasikan; setelah login, Admin dapat membuat akun baru di menu pengelolaan user. Password yang diubah tidak pernah ditampilkan kembali.
 
@@ -25,7 +26,7 @@ Jangan deploy `api/tidb-config.php`; file lokal ini diabaikan Git dan tidak ikut
 
 API mengizinkan request hingga 250 MB, membagi record ke chunk TiDB sekitar 1 MB, dan mengonfigurasi PHP dengan batas memori 1.5 GB. Dataset sebesar itu memerlukan instance Render dengan memori yang cukup (disarankan minimal 2 GB); paket lebih kecil dapat kehabisan memori walaupun batas request mengizinkan upload. Render paket berbayar menimbulkan biaya, jadi pilih kapasitas sesuai ukuran dataset sebelum deploy.
 
-Setelah deploy, `https://pulse-cho-api.onrender.com/health.php` harus mengembalikan `{"ok":true}`. Tanpa sesi login, `dataset.php` seharusnya mengembalikan HTTP 401. Login dari frontend, lalu uji baca dan upload dataset memakai akun Admin. User biasa hanya boleh membaca.
+Setelah deploy, `https://pulse-cho-v2.onrender.com/api/health.php` harus mengembalikan `{"ok":true}`. Tanpa sesi login, `https://pulse-cho-v2.onrender.com/api/dataset.php` seharusnya mengembalikan HTTP 401. Login dari halaman aplikasi, lalu uji baca dan upload dataset memakai akun Admin. User biasa hanya boleh membaca.
 
 Untuk pengembangan lokal, PHP harus memiliki ekstensi `pdo_mysql`. Isi konfigurasi lokal di `api/tidb-config.php` atau gunakan environment variables `PULSE_TIDB_*`; jangan pernah menaruh kredensial di `index.html`, dokumentasi, atau repository.
 
@@ -65,38 +66,34 @@ Semua perubahan harus sampai ke repository Git yang dipakai Render — deploy ti
    & "C:\Program Files\Git\cmd\git.exe" push
    ```
 
-2. **Environment API** (`pulse-cho-api` → Environment). Wajib ada:
+2. **Environment** layanan `pulse-cho-v2` (tab Environment). Wajib ada:
 
    | Key | Nilai |
    |---|---|
    | `PULSE_TIDB_HOST` / `PULSE_TIDB_USERNAME` / `PULSE_TIDB_PASSWORD` | kredensial TiDB |
-   | `PULSE_TIDB_CA_PATH` | `/etc/secrets/tidb-ca.pem` (Secret File `tidb-ca.pem`) |
-   | `PULSE_ALLOWED_ORIGIN` | `https://pulse-cho.onrender.com,http://localhost,http://127.0.0.1` |
+   | `PULSE_TIDB_PORT` / `PULSE_TIDB_DATABASE` | `4000` / `pulse_cho` |
+   | `PULSE_TIDB_CA_PATH` | `/etc/secrets/tidb-ca.pem` (Secret File `tidb-ca.pem`) atau kosongkan |
+   | `PULSE_ADMIN_USERNAME` / `PULSE_ADMIN_PASSWORD` / `PULSE_ADMIN_NAME` / `PULSE_ADMIN_SITE` | akun Admin awal (password ≥ 12 karakter) |
 
-3. **Migrasi skema** (sekali saja) lewat Shell layanan API:
+   Menyimpan variabel akan memicu redeploy otomatis. Admin awal dibuat saat tabel `pulse_users` masih kosong, jadi cukup diisi lewat environment ini.
+
+3. **Migrasi skema** (sekali saja) lewat Shell layanan:
 
    ```sh
-   php migrate-schema.php
+   php api/migrate-schema.php
    ```
 
-   Keluarannya harus `Selesai. Jumlah akun terdaftar: N`. Jika `N = 0`, buat Admin:
+   Keluarannya harus `Selesai. Jumlah akun terdaftar: N`. Jika `N = 0` dan environment `PULSE_ADMIN_*` tidak diisi, buat Admin manual:
 
    ```sh
-   php bootstrap-admin.php --username=19233208 --password="RahasiaPanjang123" \
+   php api/bootstrap-admin.php --username=19233208 --password="RahasiaPanjang123" \
      --name="Eva Aroma Fitriawan" --site="Site 1 Semarang"
    ```
 
 4. **Verifikasi**:
 
-   - `https://pulse-cho-api.onrender.com/health.php` → `{"ok":true}`
-   - `https://pulse-cho-api.onrender.com/dataset.php` tanpa login → HTTP 401
-   - Login di `https://pulse-cho.onrender.com` → dashboard terisi
-   - Uji cepat otomatis dari terminal:
+   - `https://pulse-cho-v2.onrender.com/api/health.php` → `{"ok":true}`
+   - `https://pulse-cho-v2.onrender.com/api/dataset.php` tanpa login → HTTP 401
+   - Login di `https://pulse-cho-v2.onrender.com` → dashboard terisi
 
-     ```powershell
-     node qa-login.mjs https://pulse-cho.onrender.com
-     ```
-
-5. **Kalau frontend tidak memakai repo ini** (layanan `pulse-cho` di-deploy dari sumber lain), salin `index.html` terbaru ke repo frontend tersebut, lalu push. Memeriksa versi yang sedang tayang: halaman production harus memuat blok `TIDB API CONFIG` dengan `provider: 'TiDB'`.
-
-6. **Render free tier** mematikan layanan setelah idle dan cold start bisa 30–60 detik. Muat dataset pertama (± 73 ribu baris) juga butuh puluhan detik karena TiDB melayani chunk berurutan di sisi database. Badge `☁ Memuat data...` dan `Memuat dataset dari TiDB... N / M baris` menunjukkan progresnya.
+5. **Render free tier** mematikan layanan setelah idle dan cold start bisa 30–60 detik. Muat dataset pertama (± 73 ribu baris) juga butuh puluhan detik karena TiDB melayani chunk berurutan di sisi database. Badge `☁ Memuat data...` dan `Memuat dataset dari TiDB... N / M baris` menunjukkan progresnya.

@@ -1,4 +1,6 @@
-# PULSE CHO — satu Web Service (Docker) berisi halaman + API.
+# PULSE CHO — satu Web Service (Docker) bernama pulse-cho-v2:
+#   /            -> index.html (halaman aplikasi)
+#   /api/*.php   -> API (auth, dataset, health)
 # Di Render: New + > Web Service > Build & deploy from a Git repository,
 #   Root Directory: (kosong)
 #   Runtime: Docker
@@ -9,7 +11,7 @@
 # tidak wajib blueprint — form manual menghasilkan layanan yang sama.
 services:
   - type: web
-    name: pulse-cho
+    name: pulse-cho-v2
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -26,10 +28,20 @@ services:
         sync: false
       - key: PULSE_TIDB_PASSWORD
         sync: false
-      # Opsional: hanya bila memakai Secret File berisi CA TiDB.
-      # Jika kosong, koneksi TLS tetap jalan memakai CA bawaan sistem.
+      # Opsional: isi dengan /etc/secrets/tidb-ca.pem bila memakai Secret File
+      # bernama tidb-ca.pem. Jika dibiarkan kosong, koneksi TLS memakai CA
+      # bawaan sistem operasi.
       - key: PULSE_TIDB_CA_PATH
-        value: /etc/secrets/tidb-ca.pem
+        sync: false
+      # Akun Admin awal: dibuat otomatis saat tabel pulse_users masih kosong.
+      - key: PULSE_ADMIN_USERNAME
+        sync: false
+      - key: PULSE_ADMIN_PASSWORD
+        sync: false
+      - key: PULSE_ADMIN_NAME
+        sync: false
+      - key: PULSE_ADMIN_SITE
+        sync: false
       # UI dan API satu domain, jadi CORS tidak dibutuhkan.
       # Isi hanya jika API diakses dari domain lain.
       - key: PULSE_ALLOWED_ORIGIN
