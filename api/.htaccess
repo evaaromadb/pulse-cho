@@ -1,0 +1,5 @@
+Options -Indexes
+
+<Files "tidb-config.php">
+  Require all denied
+</Files>

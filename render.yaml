@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: pulse-cho-api
+    runtime: docker
+    dockerContext: ./api
+    dockerfilePath: ./api/Dockerfile
+    healthCheckPath: /health.php
+    envVars:
+      - key: PULSE_ALLOWED_ORIGIN
+        value: https://pulse-cho.onrender.com
+      - key: PULSE_TIDB_HOST
+        sync: false
+      - key: PULSE_TIDB_PORT
+        value: "4000"
+      - key: PULSE_TIDB_DATABASE
+        value: pulse_cho
+      - key: PULSE_TIDB_USERNAME
+        sync: false
+      - key: PULSE_TIDB_PASSWORD
+        sync: false
+      - key: PULSE_TIDB_CA_PATH
+        value: /etc/secrets/tidb-ca.pem
+      - key: PULSE_ADMIN_USERNAME
+        sync: false
+      - key: PULSE_ADMIN_PASSWORD
+        sync: false
+      - key: PULSE_ADMIN_NAME
+        sync: false
+      - key: PULSE_ADMIN_SITE
+        sync: false

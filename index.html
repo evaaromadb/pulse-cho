@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <!-- Tailwind Play CDN (wajib dimuat SEBELUM tailwind.config) & Chart.js -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <!-- Primary XLSX CDN with automatic fallback loaders -->
@@ -256,67 +257,47 @@
   </style>
   <script>
     // =========================================================================
+    // TIDB API CONFIG — koneksi database disimpan di backend PHP, bukan browser.
+    // =========================================================================
+    const pulseLocalHost = /^(localhost|127\.0\.0\.1|pulse-cho\.test)$/i.test(window.location.hostname);
+    const pulseDefaultApiUrl = pulseLocalHost
+      ? new URL('api', document.baseURI).toString()
+      : 'https://pulse-cho-api.onrender.com';
+    window.PULSE_API_BASE_URL = (window.PULSE_API_BASE_URL || pulseDefaultApiUrl).replace(/\/+$/, '');
+    window.PULSE_CLOUD_CONFIG = {
+      url: `${window.PULSE_API_BASE_URL}/dataset.php`,
+      authUrl: `${window.PULSE_API_BASE_URL}/auth.php`,
+      provider: 'TiDB'
+    };
+    window.PULSE_CLOUD_CONFIG.isConfigured = window.location.protocol !== 'file:';
+  </script>
+  <script>
+    // =========================================================================
     // EARLY AUTH, RBAC USER STORE, THEME & UPLOAD HELPERS
     // =========================================================================
-    const PULSE_AUTH_SESSION_KEY = 'pulse_cho_auth_session_v2';
-    const PULSE_USERS_STORAGE_KEY = 'pulse_cho_users_table_v1';
     const PULSE_THEME_KEY = 'pulse_cho_theme_mode_v1';
+    window.PULSE_CURRENT_SESSION = null;
 
-    // Seed default users: Username | Nama Lengkap | Role | Site | Password
-    const DEFAULT_SEEDED_USERS = [
-      {
-        username: '19233208',
-        namaLengkap: 'Eva Aroma Fitriawan',
-        role: 'Admin',
-        site: 'Site 1 Semarang',
-        password: 'bisalah123'
-      },
-      {
-        username: '20240101',
-        namaLengkap: 'Rizky Pratama',
-        role: 'User',
-        site: 'Site 2 Semarang',
-        password: 'user123'
-      },
-      {
-        username: '20240102',
-        namaLengkap: 'Nadia Kusuma',
-        role: 'User',
-        site: 'Site 1 Bandung',
-        password: 'user123'
+    window.pulseAuthRequest = async function pulseAuthRequest(action, options = {}) {
+      const cfg = window.PULSE_CLOUD_CONFIG;
+      const headers = Object.assign({}, options.headers || {});
+      if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+      const url = `${cfg.authUrl}?action=${encodeURIComponent(action)}`;
+      const response = await fetch(url, Object.assign({}, options, {
+        headers,
+        credentials: 'include'
+      }));
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(body.error || `Autentikasi API ${response.status}`);
+        error.status = response.status;
+        throw error;
       }
-    ];
-
-    window.getStoredUsers = function getStoredUsers() {
-      try {
-        const raw = localStorage.getItem(PULSE_USERS_STORAGE_KEY);
-        if (!raw) {
-          localStorage.setItem(PULSE_USERS_STORAGE_KEY, JSON.stringify(DEFAULT_SEEDED_USERS));
-          return [...DEFAULT_SEEDED_USERS];
-        }
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed) || parsed.length === 0) {
-          localStorage.setItem(PULSE_USERS_STORAGE_KEY, JSON.stringify(DEFAULT_SEEDED_USERS));
-          return [...DEFAULT_SEEDED_USERS];
-        }
-        return parsed;
-      } catch (e) {
-        return [...DEFAULT_SEEDED_USERS];
-      }
-    };
-
-    window.saveStoredUsers = function saveStoredUsers(usersArr) {
-      try {
-        localStorage.setItem(PULSE_USERS_STORAGE_KEY, JSON.stringify(usersArr));
-      } catch (e) {}
+      return body;
     };
 
     window.getCurrentSession = function getCurrentSession() {
-      try {
-        return JSON.parse(sessionStorage.getItem(PULSE_AUTH_SESSION_KEY) || 'null');
-      } catch (e) {
-        return null;
-      }
+      return window.PULSE_CURRENT_SESSION;
     };
 
     window.isCurrentUserAdmin = function isCurrentUserAdmin() {
@@ -453,6 +434,7 @@
     };
 
     window.applyAuthenticatedSession = function applyAuthenticatedSession(sessionObj, silent = false) {
+      window.PULSE_CURRENT_SESSION = sessionObj || null;
       const gate = document.getElementById('login-gate');
       if (gate) gate.classList.add('hidden');
       const badge = document.getElementById('active-user-badge');
@@ -467,48 +449,37 @@
       }
     };
 
-    window.handleLoginSubmit = function handleLoginSubmit(event) {
+    window.handleLoginSubmit = async function handleLoginSubmit(event) {
       if (event) event.preventDefault();
       const userInp = document.getElementById('login-username');
       const passInp = document.getElementById('login-password');
       const errBox = document.getElementById('login-error-box');
       const userVal = (userInp?.value || '').trim();
-      const passVal = (passInp?.value || '').trim();
-
-      const users = window.getStoredUsers();
-      const matched = users.find(
-        u => String(u.username).trim().toLowerCase() === userVal.toLowerCase() && String(u.password) === passVal
-      );
-
-      if (!matched) {
+      try {
+        const response = await window.pulseAuthRequest('login', {
+          method: 'POST',
+          body: JSON.stringify({ username: userVal, password: passInp?.value || '' })
+        });
+        if (errBox) errBox.classList.add('hidden');
+        window.applyAuthenticatedSession(response.user, false);
+        window.location.reload();
+      } catch (error) {
         if (errBox) {
-          errBox.textContent = 'Username atau Password salah. Akun Admin awal: 19233208 / bisalah123.';
+          errBox.textContent = error.message || 'Login gagal. Periksa koneksi dan kredensial.';
           errBox.classList.remove('hidden');
         }
-        return false;
       }
-
-      if (errBox) errBox.classList.add('hidden');
-      const sessionObj = {
-        username: matched.username,
-        namaLengkap: matched.namaLengkap,
-        role: matched.role,
-        site: matched.site,
-        ts: Date.now()
-      };
-      try {
-        sessionStorage.setItem(PULSE_AUTH_SESSION_KEY, JSON.stringify(sessionObj));
-      } catch (e) {}
-      window.applyAuthenticatedSession(sessionObj, false);
       return false;
     };
 
-    window.logoutSession = function logoutSession() {
+    window.logoutSession = async function logoutSession() {
       try {
-        sessionStorage.removeItem(PULSE_AUTH_SESSION_KEY);
-      } catch (e) {}
-      const gate = document.getElementById('login-gate');
-      if (gate) gate.classList.remove('hidden');
+        await window.pulseAuthRequest('logout', { method: 'POST', body: '{}' });
+      } catch (error) {
+        console.warn('Logout API tidak merespons:', error);
+      }
+      window.PULSE_CURRENT_SESSION = null;
+      window.location.reload();
     };
 
     window.toggleThemeMode = function toggleThemeMode() {
@@ -548,7 +519,7 @@
   <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
 
   <!-- =====================================================================
-       SECURE LOGIN GATE (USERNAME | NAMA LENGKAP | ROLE | SITE | PASSWORD)
+       SERVER-AUTHENTICATED LOGIN GATE
        ===================================================================== -->
   <div id="login-gate" class="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center p-4 overflow-y-auto">
     <div class="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-6 sm:p-7 my-auto">
@@ -568,14 +539,14 @@
       <form onsubmit="return handleLoginSubmit(event)" class="space-y-3.5">
         <div>
           <label class="block text-xs font-semibold text-slate-200 mb-1">Username (NIK / ID)</label>
-          <input id="login-username" type="text" value="19233208" required
+          <input id="login-username" type="text" autocomplete="username" required
             class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-orange-500 font-mono"
             placeholder="Masukkan Username..." />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-200 mb-1">Password</label>
           <div class="relative">
-            <input id="login-password" type="password" value="bisalah123" required
+            <input id="login-password" type="password" autocomplete="current-password" required
               class="w-full px-3.5 py-2.5 pr-16 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-orange-500"
               placeholder="••••••••••••" />
             <button type="button" onclick="toggleLoginPasswordVisibility()" id="login-eye-btn"
@@ -593,26 +564,9 @@
         </button>
       </form>
 
-      <div class="mt-5 pt-4 border-t border-slate-800">
-        <p class="text-[11px] font-semibold text-slate-300 mb-2">Akun Terdaftar (Klik untuk Isi Otomatis):</p>
-        <div class="space-y-1.5 text-[11px]">
-          <button type="button" data-user="19233208" data-pass="bisalah123" onclick="quickFillLoginFromEl(this)"
-            class="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-orange-950/50 hover:bg-orange-900/60 text-orange-200 border border-orange-500/40 font-medium transition cursor-pointer text-left">
-            <span><strong>19233208</strong> • Eva Aroma Fitriawan</span>
-            <span class="px-1.5 py-0.5 rounded bg-orange-500 text-white text-[9px] font-bold">Admin • Site 1 SMG</span>
-          </button>
-          <div class="grid grid-cols-2 gap-1.5">
-            <button type="button" data-user="20240101" data-pass="user123" onclick="quickFillLoginFromEl(this)"
-              class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition cursor-pointer text-left truncate">
-              20240101 • User (S2 SMG)
-            </button>
-            <button type="button" data-user="20240102" data-pass="user123" onclick="quickFillLoginFromEl(this)"
-              class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition cursor-pointer text-left truncate">
-              20240102 • User (S1 BDG)
-            </button>
-          </div>
-        </div>
-      </div>
+      <p class="mt-5 pt-4 border-t border-slate-800 text-[11px] text-slate-400">
+        Gunakan akun yang diberikan oleh administrator PULSE CHO.
+      </p>
     </div>
   </div>
 
@@ -761,6 +715,9 @@
           </span>
           <span id="upload-status-badge" class="text-xs font-mono text-slate-200">
             Database kosong (0 tiket) — Silakan klik Upload atau tarik file ke area ini
+          </span>
+          <span id="cloud-sync-badge" class="px-2 py-0.5 rounded-md border border-slate-600 bg-slate-800/80 text-slate-300 text-[10px] font-mono font-bold">
+            ☁ Memeriksa cloud...
           </span>
           <button id="reset-data-btn" type="button" onclick="resetDashboardData()"
             class="px-2.5 py-1 rounded-lg bg-red-600/20 hover:bg-red-600/35 border border-red-500/40 text-[11px] font-semibold text-red-300 transition cursor-pointer"
@@ -1396,7 +1353,7 @@
       <div class="px-4 py-3 bg-slate-950/85 border-b border-slate-800 flex items-center justify-between gap-2">
         <div>
           <h4 class="text-sm sm:text-base font-extrabold text-white">Pengaturan User Login &amp; Role RBAC</h4>
-          <p class="text-xs text-slate-400">Kelola akun: Username | Nama Lengkap | Role (Admin / User) | Site | Password</p>
+          <p class="text-xs text-slate-400">Kelola akun dan role. Password disimpan sebagai hash di server.</p>
         </div>
         <button onclick="closeUserManagementModal()"
           class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer">
@@ -1430,8 +1387,8 @@
               class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-orange-500" />
           </div>
           <div>
-            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Password</label>
-            <input id="um-password" type="text" required placeholder="Password"
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Password (min. 12 karakter)</label>
+            <input id="um-password" type="password" autocomplete="new-password" placeholder="Kosongkan saat tidak mengganti"
               class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-orange-500" />
           </div>
           <div class="sm:col-span-6 flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -1457,7 +1414,6 @@
                 <th class="py-2 px-3">Nama Lengkap</th>
                 <th class="py-2 px-3">Role</th>
                 <th class="py-2 px-3">Site</th>
-                <th class="py-2 px-3">Password</th>
                 <th class="py-2 px-3 text-right">Aksi</th>
               </tr>
             </thead>
@@ -1931,10 +1887,139 @@
     let filterDateEnd = null;
     let activeDatePreset = 'MTD';
 
-    // IndexedDB Persistence Config
+    // =========================================================================
+    // CLOUD PERSISTENCE (TiDB API) + LOCAL CACHE (IndexedDB)
+    // -------------------------------------------------------------------------
+    // Sumber kebenaran data = tabel TiDB `pulse_dataset` (satu baris JSON).
+    // Upload / Reset akan MENGGANTI baris tersebut, sehingga data lama terhapus
+    // dan semua browser/perangkat melihat dataset yang sama.
+    // IndexedDB dipertahankan hanya sebagai cache offline (baca cepat).
+    // =========================================================================
     const PULSE_DB_NAME = 'PulseChoStorageDB_v1';
     const PULSE_DB_STORE = 'uploaded_rows_store';
     const PULSE_DB_RECORD_KEY = 'active_dataset_v1';
+    const PULSE_CLOUD_POLL_MS = 60000;
+
+    let pulseCloudLastVersion = null;
+    let pulseCloudLastSavedBy = null;
+    let pulseCloudLastSavedAt = null;
+    let pulseCloudPollTimer = null;
+    let pulseCloudSaveInFlight = false;
+
+    function getPulseCloudConfig() {
+      return window.PULSE_CLOUD_CONFIG || null;
+    }
+
+    function isPulseCloudEnabled() {
+      const cfg = getPulseCloudConfig();
+      return Boolean(cfg && cfg.isConfigured);
+    }
+
+    function getPulseCloudApiUrl(query = '') {
+      const cfg = getPulseCloudConfig();
+      return `${cfg.url}${query}`;
+    }
+
+    function setPulseSyncBadge(text, tone = 'slate') {
+      const el = document.getElementById('cloud-sync-badge');
+      if (!el) return;
+      const tones = {
+        slate: 'bg-slate-800/80 border-slate-600 text-slate-300',
+        emerald: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+        amber: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+        red: 'bg-red-500/15 border-red-500/40 text-red-300',
+        sky: 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+      };
+      el.className = `px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold ${tones[tone] || tones.slate}`;
+      el.textContent = text;
+      el.title = isPulseCloudEnabled()
+        ? 'Data disinkronkan ke TiDB melalui backend PHP dan dibagi ke semua browser/user.'
+        : 'Cloud tidak aktif. Buka aplikasi melalui server Laragon, bukan file://.';
+    }
+
+    async function pulseCloudRequest(query = '', options = {}) {
+      if (!isPulseCloudEnabled()) throw new Error('API TiDB tidak tersedia. Buka aplikasi melalui server web.');
+      const headers = Object.assign({}, options.headers || {});
+      if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+      const res = await fetch(getPulseCloudApiUrl(query), Object.assign({}, options, {
+        headers,
+        credentials: 'include'
+      }));
+      if (!res.ok) {
+        let detail = '';
+        try { detail = await res.text(); } catch (e) {}
+        let message = detail.slice(0, 240);
+        try { message = JSON.parse(detail).error || message; } catch (e) {}
+        throw new Error(`TiDB API ${res.status}: ${message}`);
+      }
+      const ct = res.headers.get('content-type') || '';
+      return ct.includes('application/json') ? await res.json() : null;
+    }
+
+    /**
+     * Ambil dataset aktif dari TiDB. `metaOnly` = hanya kolom ringan (untuk polling).
+     * Return { rows: [] | null, version, rowCount, savedBy, savedAt }
+     */
+    async function readPulseDatasetFromCloud({ metaOnly = false } = {}) {
+      const record = await pulseCloudRequest(metaOnly ? '?metaOnly=1' : '');
+      if (!record || !record.exists) return { rows: null, version: null, rowCount: 0, savedBy: null, savedAt: null };
+      return {
+        rows: !metaOnly && Array.isArray(record.rows) ? record.rows : (metaOnly ? null : []),
+        version: `${record.saved_at || ''}|${record.row_count || 0}`,
+        rowCount: Number(record.row_count || 0),
+        savedBy: record.saved_by || null,
+        savedAt: record.saved_at || null
+      };
+    }
+
+    /**
+     * Ganti dataset di cloud (upsert satu baris). Data lama otomatis tertimpa.
+     */
+    async function writePulseDatasetToCloud(rows, savedBy = '') {
+      const data = await pulseCloudRequest('', {
+        method: 'PUT',
+        body: JSON.stringify({
+          rows: Array.isArray(rows) ? rows : [],
+          saved_by: savedBy || '-'
+        })
+      });
+      pulseCloudLastVersion = `${data.saved_at || ''}|${data.row_count || 0}`;
+      pulseCloudLastSavedBy = data.saved_by || savedBy || '-';
+      pulseCloudLastSavedAt = data.saved_at || null;
+      return data;
+    }
+
+    async function deletePulseDatasetFromCloud() {
+      await pulseCloudRequest('', { method: 'DELETE' });
+      pulseCloudLastVersion = null;
+      pulseCloudLastSavedBy = null;
+      pulseCloudLastSavedAt = null;
+    }
+
+    function formatCloudSavedAt(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+      } catch (e) {
+        return String(iso);
+      }
+    }
+
+    function updateCloudSyncBadge() {
+      if (typeof document === 'undefined' || !document.getElementById('cloud-sync-badge')) return;
+      if (typeof document === 'undefined') return;
+      if (!isPulseCloudEnabled()) {
+        setPulseSyncBadge('☁ Cloud belum dikonfigurasi', 'amber');
+        return;
+      }
+      if (pulseCloudSaveInFlight) {
+        setPulseSyncBadge('☁ Menyimpan ke cloud...', 'sky');
+        return;
+      }
+      const stamp = formatCloudSavedAt(pulseCloudLastSavedAt);
+      const who = pulseCloudLastSavedBy ? ` oleh ${pulseCloudLastSavedBy}` : '';
+      setPulseSyncBadge(stamp ? `☁ Tersinkron • ${stamp}${who}` : '☁ Cloud aktif (belum ada data)', pulseCloudLastSavedAt ? 'emerald' : 'slate');
+    }
 
     function openPulseIndexedDb() {
       return new Promise((resolve, reject) => {
@@ -2002,6 +2087,156 @@
       } catch (err) {
         console.warn('Gagal menghapus data di IndexedDB:', err);
       }
+    }
+
+    /**
+     * REPLACE: upsert dataset aktif ke cloud + perbarui cache lokal.
+     */
+    async function replaceActiveDataset(rows, savedBy = '') {
+      if (!isPulseCloudEnabled()) return { ok: false, reason: 'not_configured' };
+      pulseCloudSaveInFlight = true;
+      updateCloudSyncBadge();
+      try {
+        await writePulseDatasetToCloud(rows, savedBy);
+        await saveUploadedRowsToDb(rows);
+        return { ok: true };
+      } catch (err) {
+        console.error('Gagal mengganti dataset di cloud:', err);
+        return { ok: false, reason: err.message || String(err) };
+      } finally {
+        pulseCloudSaveInFlight = false;
+        updateCloudSyncBadge();
+      }
+    }
+
+    async function clearActiveDatasetEverywhere() {
+      const errors = [];
+      if (isPulseCloudEnabled()) {
+        pulseCloudSaveInFlight = true;
+        updateCloudSyncBadge();
+        try {
+          await deletePulseDatasetFromCloud();
+        } catch (err) {
+          console.error('Gagal menghapus dataset di cloud:', err);
+          errors.push(err.message || String(err));
+        } finally {
+          pulseCloudSaveInFlight = false;
+          updateCloudSyncBadge();
+        }
+      }
+      await clearUploadedRowsFromDb();
+      return errors;
+    }
+
+    /**
+     * Cek apakah dataset di cloud berubah (upload baru / reset oleh admin lain).
+     */
+    async function checkCloudDatasetFreshness({ silent = true, force = false } = {}) {
+      if (!isPulseCloudEnabled() || pulseCloudSaveInFlight) return;
+      if (force) pulseCloudLastVersion = null;
+      try {
+        const meta = await readPulseDatasetFromCloud({ metaOnly: true });
+        const versionKey = meta.version;
+        if (versionKey === pulseCloudLastVersion) return;
+
+        const hadPrevious = Boolean(pulseCloudLastVersionUpdated);
+        pulseCloudLastVersion = versionKey;
+        pulseCloudLastSavedBy = meta.savedBy;
+        pulseCloudLastSavedAt = meta.savedAt;
+        pulseCloudLastVersionUpdated = true;
+        updateCloudSyncBadge();
+
+        if (!meta.rowCount) {
+          // Data di cloud kosong (admin lain melakukan Reset) -> bersihkan tampilan
+          if (rawUploadedRows.length > 0 || filteredTickets.length > 0) {
+            rawUploadedRows = [];
+            allValid2MonthTickets = [];
+            filteredTickets = [];
+            currentModalTickets = [];
+            await clearUploadedRowsFromDb();
+            updateUploadStatusBadge(0, {});
+            if (activePageView === 'GRAPARI') {
+              renderGrapariEscalationPage();
+            } else {
+              renderFullDashboard();
+            }
+          }
+          if (!silent && hadPrevious) {
+            window.showToast('Dataset di cloud dikosongkan oleh admin. Dashboard di-reset.', 'info');
+          }
+          return;
+        }
+
+        // Perubahan pertama kali saat load tidak perlu diumumkan
+        if (!hadPrevious) return;
+
+        const full = await readPulseDatasetFromCloud({ metaOnly: false });
+        if (full && Array.isArray(full.rows) && full.rows.length > 0) {
+          await saveUploadedRowsToDb(full.rows);
+          ingestAndFilterData(full.rows);
+          if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
+            window.applyDatePreset('ALL_UPLOADED', false);
+          }
+          window.showToast(`Data terbaru dari cloud dimuat (${full.rows.length.toLocaleString('id-ID')} baris${full.savedBy ? ', oleh ' + full.savedBy : ''}).`, 'info');
+        }
+      } catch (err) {
+        console.warn('Gagal memeriksa pembaruan cloud:', err);
+        setPulseSyncBadge('☁ Cloud offline (pakai cache)', 'red');
+      }
+    }
+
+    function startCloudDatasetPolling() {
+      stopCloudDatasetPolling();
+      if (!isPulseCloudEnabled()) return;
+      pulseCloudPollTimer = setInterval(() => {
+        if (document.hidden) return;
+        checkCloudDatasetFreshness({ silent: true });
+      }, PULSE_CLOUD_POLL_MS);
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkCloudDatasetFreshness({ silent: true });
+      });
+    }
+
+    function stopCloudDatasetPolling() {
+      if (pulseCloudPollTimer) {
+        clearInterval(pulseCloudPollTimer);
+        pulseCloudPollTimer = null;
+      }
+    }
+
+    /**
+     * Muat dataset: cloud dulu, lalu cache lokal sebagai fallback offline.
+     */
+    async function loadActiveDataset() {
+      let cloudError = null;
+      if (isPulseCloudEnabled()) {
+        try {
+          const cloud = await readPulseDatasetFromCloud({ metaOnly: false });
+          pulseCloudLastVersion = cloud.version;
+          pulseCloudLastSavedBy = cloud.savedBy;
+          pulseCloudLastSavedAt = cloud.savedAt;
+          pulseCloudLastVersionUpdated = true;
+          updateCloudSyncBadge();
+          if (Array.isArray(cloud.rows)) {
+            if (cloud.rows.length > 0) await saveUploadedRowsToDb(cloud.rows);
+            else await clearUploadedRowsFromDb();
+            return cloud.rows;
+          }
+          return [];
+        } catch (err) {
+          cloudError = err;
+          console.warn('Gagal memuat dataset dari cloud, fallback ke cache lokal:', err);
+          setPulseSyncBadge('☁ Cloud offline (pakai cache)', 'red');
+        }
+      } else {
+        updateCloudSyncBadge();
+      }
+
+      const cachedRows = await loadUploadedRowsFromDb();
+      if (cloudError && cachedRows && cachedRows.length > 0) {
+        window.showToast('Gagal menghubungi cloud. Menampilkan data cache terakhir di browser ini.', 'error');
+      }
+      return cachedRows;
     }
 
     // Filter State
@@ -2533,7 +2768,9 @@
       }
       const fileInfo = statsMeta.fileCount ? `[${statsMeta.fileCount} file] ` : '';
       const skipNote = skippedUnitCount > 0 ? ` • ${skippedUnitCount} baris non-unit diabaikan` : '';
-      badge.textContent = `${fileInfo}Aktif: ${filteredTickets.length.toLocaleString('id-ID')} tiket tampil (dari ${allValid2MonthTickets.length.toLocaleString('id-ID')} tiket valid DB${skipNote})`;
+      const storeLabel = isPulseCloudEnabled() ? 'DB Cloud' : 'DB Lokal';
+      badge.textContent = `${fileInfo}Aktif: ${filteredTickets.length.toLocaleString('id-ID')} tiket tampil (dari ${allValid2MonthTickets.length.toLocaleString('id-ID')} tiket valid ${storeLabel}${skipNote})`;
+      updateCloudSyncBadge();
     }
 
     function computeKpiMetrics(ticketList) {
@@ -2797,7 +3034,20 @@
         return;
       }
 
-      await saveUploadedRowsToDb(combinedRecords);
+      const session = window.getCurrentSession();
+      const savedBy = session ? `${session.namaLengkap || session.username} (${session.username})` : '-';
+
+      if (isPulseCloudEnabled()) {
+        const result = await replaceActiveDataset(combinedRecords, savedBy);
+        if (!result.ok) {
+          window.showToast(`Gagal menyimpan ke cloud: ${result.reason}. Data TIDAK diubah.`, 'error');
+          return;
+        }
+      } else {
+        // Cloud belum dikonfigurasi: simpan hanya di browser ini (mode replace)
+        await saveUploadedRowsToDb(combinedRecords);
+      }
+
       ingestAndFilterData(combinedRecords, { fileCount: files.length });
 
       if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
@@ -2817,14 +3067,20 @@
       allValid2MonthTickets = [];
       filteredTickets = [];
       currentModalTickets = [];
-      await clearUploadedRowsFromDb();
+      const resetErrors = await clearActiveDatasetEverywhere();
       updateUploadStatusBadge(0, {});
       if (activePageView === 'GRAPARI') {
         renderGrapariEscalationPage();
       } else {
         renderFullDashboard();
       }
-      window.showToast('Seluruh data dashboard berhasil di-reset (0 tiket).', 'info');
+      if (resetErrors.length > 0) {
+        window.showToast(`Data lokal di-reset, tetapi gagal menghapus di cloud: ${resetErrors[0]}`, 'error');
+      } else {
+        window.showToast(isPulseCloudEnabled()
+          ? 'Dataset di cloud & semua browser berhasil dikosongkan (0 tiket).'
+          : 'Seluruh data dashboard berhasil di-reset (0 tiket).', 'info');
+      }
     };
 
     // =========================================================================
@@ -3962,7 +4218,7 @@
     };
 
     window.editUserRow = function editUserRow(username) {
-      const users = window.getStoredUsers();
+      const users = window.PULSE_USERS_CACHE || [];
       const u = users.find(item => item.username === username);
       if (!u) return;
       editingUsernameKey = u.username;
@@ -3971,27 +4227,26 @@
       document.getElementById('um-nama').value = u.namaLengkap;
       document.getElementById('um-role').value = u.role;
       document.getElementById('um-site').value = u.site;
-      document.getElementById('um-password').value = u.password;
+      document.getElementById('um-password').value = '';
       document.getElementById('um-form-mode-label').textContent = `Mode: Edit User (${u.username})`;
     };
 
-    window.deleteUserRow = function deleteUserRow(username) {
+    window.deleteUserRow = async function deleteUserRow(username) {
       const sess = window.getCurrentSession();
       if (sess && sess.username === username) {
         window.showToast('Tidak dapat menghapus akun yang sedang aktif digunakan.', 'error');
         return;
       }
-      const users = window.getStoredUsers().filter(u => u.username !== username);
-      if (users.length === 0) {
-        window.showToast('Minimal harus ada 1 akun Admin tersisa.', 'error');
-        return;
+      try {
+        await window.pulseAuthRequest(`users&username=${encodeURIComponent(username)}`, { method: 'DELETE' });
+        await window.renderUserManagementTable();
+        window.showToast(`User ${username} berhasil dihapus.`, 'info');
+      } catch (error) {
+        window.showToast(error.message || 'Gagal menghapus user.', 'error');
       }
-      window.saveStoredUsers(users);
-      window.renderUserManagementTable();
-      window.showToast(`User ${username} berhasil dihapus.`, 'info');
     };
 
-    window.handleSaveUserForm = function handleSaveUserForm(event) {
+    window.handleSaveUserForm = async function handleSaveUserForm(event) {
       if (event) event.preventDefault();
       if (!window.isCurrentUserAdmin()) {
         window.showToast('Akses ditolak: Hanya Role Admin yang dapat menyimpan user.', 'error');
@@ -4002,40 +4257,51 @@
       const namaLengkap = (document.getElementById('um-nama')?.value || '').trim();
       const role = document.getElementById('um-role')?.value === 'Admin' ? 'Admin' : 'User';
       const site = (document.getElementById('um-site')?.value || '').trim();
-      const password = (document.getElementById('um-password')?.value || '').trim();
+      const password = document.getElementById('um-password')?.value || '';
 
-      if (!username || !namaLengkap || !site || !password) {
-        window.showToast('Lengkapi seluruh field Username, Nama Lengkap, Role, Site, dan Password.', 'error');
+      if (!username || !namaLengkap || !site || (!editingUsernameKey && password.length < 12)) {
+        window.showToast('Lengkapi data user. Password user baru minimal 12 karakter.', 'error');
         return false;
       }
 
-      const users = window.getStoredUsers();
-      if (editingUsernameKey) {
-        const idx = users.findIndex(u => u.username === editingUsernameKey);
-        if (idx >= 0) {
-          users[idx] = { username: editingUsernameKey, namaLengkap, role, site, password };
-        }
-        window.saveStoredUsers(users);
-        window.showToast(`Data user ${editingUsernameKey} diperbarui.`, 'success');
-      } else {
-        if (users.some(u => u.username.toLowerCase() === username.toLowerCase())) {
-          window.showToast(`Username ${username} sudah terdaftar.`, 'error');
+      try {
+        const method = editingUsernameKey ? 'PUT' : 'POST';
+        const payload = { username: editingUsernameKey || username, namaLengkap, role, site, password };
+        const changedOwnPassword = Boolean(
+          editingUsernameKey
+          && password
+          && editingUsernameKey === window.getCurrentSession()?.username
+        );
+        await window.pulseAuthRequest('users', { method, body: JSON.stringify(payload) });
+        if (changedOwnPassword) {
+          window.showToast('Password berubah. Silakan login kembali.', 'info');
+          await window.logoutSession();
           return false;
         }
-        users.push({ username, namaLengkap, role, site, password });
-        window.saveStoredUsers(users);
-        window.showToast(`User baru ${namaLengkap} (${username}) ditambahkan.`, 'success');
+        window.showToast(editingUsernameKey
+          ? `Data user ${editingUsernameKey} diperbarui.`
+          : `User baru ${namaLengkap} (${username}) ditambahkan.`, 'success');
+        window.resetUserForm();
+        await window.renderUserManagementTable();
+      } catch (error) {
+        window.showToast(error.message || 'Gagal menyimpan user.', 'error');
       }
-
-      window.resetUserForm();
-      window.renderUserManagementTable();
       return false;
     };
 
-    window.renderUserManagementTable = function renderUserManagementTable() {
+    window.renderUserManagementTable = async function renderUserManagementTable() {
       const tbody = document.getElementById('user-mgmt-tbody');
       if (!tbody) return;
-      const users = window.getStoredUsers();
+      tbody.innerHTML = '<tr><td colspan="5" class="py-4 px-3 text-center text-slate-400">Memuat user...</td></tr>';
+      let users = [];
+      try {
+        const response = await window.pulseAuthRequest('users');
+        users = Array.isArray(response.users) ? response.users : [];
+        window.PULSE_USERS_CACHE = users;
+      } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-4 px-3 text-center text-red-300">${escapeHtmlAttr(error.message || 'Gagal memuat user.')}</td></tr>`;
+        return;
+      }
       tbody.innerHTML = users.map(u => `
         <tr class="hover:bg-slate-800/45">
           <td class="py-2 px-3 font-mono font-bold text-orange-300">${escapeHtmlAttr(u.username)}</td>
@@ -4044,7 +4310,6 @@
             <span class="px-2 py-0.5 rounded text-[10px] font-bold ${u.role === 'Admin' ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40' : 'bg-sky-500/20 text-sky-300 border border-sky-500/40'}">${escapeHtmlAttr(u.role)}</span>
           </td>
           <td class="py-2 px-3 text-slate-300">${escapeHtmlAttr(u.site)}</td>
-          <td class="py-2 px-3 font-mono text-slate-400">${escapeHtmlAttr(u.password)}</td>
           <td class="py-2 px-3 text-right space-x-1.5">
             <button type="button" data-edit-user="${escapeHtmlAttr(u.username)}" onclick="editUserRow(this.dataset.editUser)"
               class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold cursor-pointer">Edit</button>
@@ -4124,22 +4389,28 @@
     // 10. INITIALIZATION
     // =========================================================================
     async function initPulseChoApp() {
-      // Seed users table if not present
-      window.getStoredUsers();
-
       const isDark = document.documentElement.classList.contains('dark');
       window.updateThemeButtonUI(isDark);
       window.ensureXlsxLoaded();
+      window.syncRolePermissionsUI();
 
+      let authenticated = false;
       try {
-        const savedSession = window.getCurrentSession();
-        if (savedSession && savedSession.username) {
-          window.applyAuthenticatedSession(savedSession, true);
-        } else {
-          window.syncRolePermissionsUI();
+        const response = await window.pulseAuthRequest('me');
+        if (response.user && response.user.username) {
+          window.applyAuthenticatedSession(response.user, true);
+          authenticated = true;
         }
-      } catch (e) {
+      } catch (error) {
+        window.PULSE_CURRENT_SESSION = null;
         window.syncRolePermissionsUI();
+        if (error.status !== 401) {
+          const errBox = document.getElementById('login-error-box');
+          if (errBox) {
+            errBox.textContent = error.message || 'Layanan login belum tersedia.';
+            errBox.classList.remove('hidden');
+          }
+        }
       }
 
       loadSavedTargetConfig();
@@ -4167,7 +4438,8 @@
         });
       }
 
-      const persistedRows = await loadUploadedRowsFromDb();
+      // Muat dataset: cloud (TiDB) dulu, cache IndexedDB hanya fallback offline
+      const persistedRows = authenticated ? await loadActiveDataset() : null;
       if (persistedRows && persistedRows.length > 0) {
         ingestAndFilterData(persistedRows);
         if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
@@ -4176,6 +4448,9 @@
       } else {
         ingestAndFilterData([]);
       }
+
+      // Pantau perubahan dataset oleh admin lain (polling ringan + saat tab kembali aktif)
+      if (authenticated) startCloudDatasetPolling();
     }
 
     if (document.readyState === 'loading') {
