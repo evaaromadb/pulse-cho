@@ -82,6 +82,32 @@ function pulseChunkIndexRows(PDO $pdo, string $versionId): array
     return $chunks;
 }
 
+/**
+ * Cadangan bila tabel index chunk kosong (dataset lama): susun daftar chunk dari
+ * tabel chunks tanpa membaca isi JSON-nya, supaya browser tetap paralel.
+ */
+function pulseDescribeChunksFromTable(PDO $pdo, string $versionId, int $expectedRows): array
+{
+    if ($versionId === '') {
+        return [];
+    }
+    $statement = $pdo->prepare(
+        'SELECT chunk_index, row_count FROM pulse_dataset_chunks
+         WHERE dataset_key = :dataset_key AND version_id = :version_id
+         ORDER BY chunk_index'
+    );
+    $statement->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $versionId]);
+    $chunks = [];
+    foreach ($statement->fetchAll() as $row) {
+        $chunks[] = [
+            'index' => (int) $row['chunk_index'],
+            'row_count' => (int) $row['row_count'],
+            'byte_length' => 0,
+        ];
+    }
+    return $chunks;
+}
+
 try {
     $pdo = pulseDatabase();
     $currentUser = pulseCurrentUser($pdo);
@@ -149,40 +175,12 @@ try {
             pulseRespond($payload + ['rows' => null]);
         }
 
-        if (!$wantsIndex && $chunks === []) {
-            // Dataset lama (belum punya index chunk): kirim utuh, streaming per chunk.
-            pulseStreamStart();
-            $prefix = json_encode($payload + ['chunks' => []], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-            echo substr($prefix, 0, -1) . ',"rows":[';
-            flush();
-            $statement = $pdo->prepare(
-                'SELECT `rows` FROM pulse_dataset_chunks
-                 WHERE dataset_key = :dataset_key AND version_id = :version_id
-                 ORDER BY chunk_index'
-            );
-            $statement->execute(['dataset_key' => 'active_dataset_v1', 'version_id' => $activeVersion]);
-            $first = true;
-            unset($record);
-            while ($chunk = $statement->fetch(PDO::FETCH_NUM)) {
-                $chunkJson = trim((string) $chunk[0]);
-                if ($chunkJson === '' || $chunkJson === '[]') {
-                    continue;
-                }
-                if ($chunkJson[0] !== '[' || substr($chunkJson, -1) !== ']') {
-                    throw new RuntimeException('Format chunk dataset di TiDB tidak valid.');
-                }
-                echo ($first ? '' : ',') . substr($chunkJson, 1, -1);
-                $first = false;
-                flush();
-                if (connection_aborted()) {
-                    exit;
-                }
-            }
-            echo ']}';
-            exit;
+        // Mode index: cukup metadata + daftar chunk (dataset besar TIDAK di-stream).
+        // Jika tabel index chunk belum terisi (dataset lama), daftar chunk dibentuk
+        // dari jumlah baris per chunk supaya browser tetap memakai unduhan paralel.
+        if ($chunks === []) {
+            $chunks = pulseDescribeChunksFromTable($pdo, $activeVersion, $payload['row_count']);
         }
-
-        // Mode index: cukup metadata + daftar chunk.
         pulseRespond($payload + [
             'rows' => null,
             'version' => $activeVersion,
