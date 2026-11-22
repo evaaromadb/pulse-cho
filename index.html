@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="id" class="dark">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -488,6 +488,51 @@
     html:not(.dark) #activity-modal .text-emerald-300 {
       color: #047857 !important;
     }
+
+    /* --- Login Gate (mode terang) --- */
+    html:not(.dark) #login-gate {
+      background: linear-gradient(180deg, #eef2f7 0%, #dbe3ee 100%) !important;
+    }
+    html:not(.dark) #login-gate > div {
+      background-color: #ffffff !important;
+      border-color: #cbd5e1 !important;
+      color-scheme: light;
+    }
+    html:not(.dark) #login-gate :is(.text-white, .text-slate-100, .text-slate-200) {
+      color: #0f172a !important;
+    }
+    html:not(.dark) #login-gate :is(.text-slate-300, .text-slate-400) {
+      color: #475569 !important;
+    }
+    html:not(.dark) #login-gate .text-orange-300 {
+      color: #c2410c !important;
+    }
+    html:not(.dark) #login-gate .bg-slate-950 {
+      background-color: #f8fafc !important;
+      border-color: #cbd5e1 !important;
+      color: #0f172a !important;
+    }
+    html:not(.dark) #login-gate input::placeholder {
+      color: #94a3b8 !important;
+    }
+    html:not(.dark) #login-gate :is(.bg-slate-800, .bg-slate-700) {
+      background-color: #e2e8f0 !important;
+      border-color: #cbd5e1 !important;
+      color: #334155 !important;
+    }
+    html:not(.dark) #login-gate .border-slate-800 {
+      border-color: #e2e8f0 !important;
+    }
+    html:not(.dark) #login-gate #login-error-box {
+      background-color: #fee2e2 !important;
+      border-color: #fca5a5 !important;
+      color: #b91c1c !important;
+    }
+    /* Pertahankan teks putih pada logo & tombol utama yang bergradasi */
+    html:not(.dark) #login-gate :is(.bg-gradient-to-br, .bg-gradient-to-r),
+    html:not(.dark) #login-gate button[type="submit"] {
+      color: #ffffff !important;
+    }
   </style>
   <script>
     // =========================================================================
@@ -666,18 +711,102 @@
           roleHint.className = 'px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-[10px] font-mono font-bold text-amber-300';
         }
       }
+    };
 
-      // Show User Management button for Admin
-      const userMgmtBtn = document.getElementById('open-user-mgmt-btn');
-      if (userMgmtBtn) {
-        userMgmtBtn.classList.toggle('hidden', !isAdmin);
+    // =========================================================================
+    // HAK AKSES MENU PER ROLE (VISIBILITAS NAVIGASI/MENU)
+    // -------------------------------------------------------------------------
+    // Admin mengatur menu mana yang tampil untuk tiap role lewat modal User
+    // Management. Konfigurasi disimpan di server (endpoint role-menus) lalu
+    // diterapkan dinamis ke navigasi setelah login. Server tetap menjadi sumber
+    // kebenaran RBAC: menu aksi khusus hanya berlaku untuk role Admin.
+    // =========================================================================
+    window.PULSE_MENU_DEFS = [
+      { key: 'nav-dashboard', label: 'Dashboard KPI', selector: 'nav-tab-DASHBOARD', adminOnly: false },
+      { key: 'nav-grapari', label: 'Report Eskalasi Grapari', selector: 'nav-tab-GRAPARI', adminOnly: false },
+      { key: 'action-export', label: 'Export Excel', selector: 'header-export-btn', adminOnly: false },
+      { key: 'action-upload', label: 'Upload Data', selector: 'header-upload-btn', adminOnly: true },
+      { key: 'action-activity', label: 'Last Activity', selector: 'open-activity-btn', adminOnly: true },
+      { key: 'action-users', label: 'Manajemen User', selector: 'open-user-mgmt-btn', adminOnly: true }
+    ];
+
+    const PULSE_DEFAULT_ROLE_MENUS = {
+      Admin: ['nav-dashboard', 'nav-grapari', 'action-export', 'action-upload', 'action-activity', 'action-users'],
+      User: ['nav-dashboard', 'nav-grapari', 'action-export']
+    };
+
+    function normalizeRoleMenus(raw) {
+      const src = (raw && typeof raw === 'object') ? raw : {};
+      const out = {};
+      ['Admin', 'User'].forEach(role => {
+        const list = Array.isArray(src[role]) ? src[role] : PULSE_DEFAULT_ROLE_MENUS[role];
+        out[role] = window.PULSE_MENU_DEFS.filter(d => list.includes(d.key)).map(d => d.key);
+      });
+      out.Admin = window.PULSE_MENU_DEFS.map(d => d.key);
+      return out;
+    }
+
+    window.getRoleMenuConfig = async function getRoleMenuConfig(forceReload = false) {
+      if (window.PULSE_ROLE_MENUS && !forceReload) {
+        return window.PULSE_ROLE_MENUS;
+      }
+      try {
+        const res = await window.pulseAuthRequest('role-menus');
+        window.PULSE_ROLE_MENUS = normalizeRoleMenus(res && res.roles);
+      } catch (error) {
+        window.PULSE_ROLE_MENUS = normalizeRoleMenus(PULSE_DEFAULT_ROLE_MENUS);
+      }
+      return window.PULSE_ROLE_MENUS;
+    };
+
+    function computeAllowedMenus(role) {
+      const roleName = String(role || '');
+      if (roleName.toLowerCase() === 'admin') {
+        return window.PULSE_MENU_DEFS.map(d => d.key);
+      }
+      const cfg = window.PULSE_ROLE_MENUS || PULSE_DEFAULT_ROLE_MENUS;
+      const source = Array.isArray(cfg[roleName]) ? cfg[roleName] : PULSE_DEFAULT_ROLE_MENUS.User;
+      return window.PULSE_MENU_DEFS
+        .filter(d => source.includes(d.key) && !d.adminOnly)
+        .map(d => d.key);
+    }
+
+    function applyMenuVisibilityForRole(role) {
+      const allowed = new Set(computeAllowedMenus(role));
+      window.PULSE_MENU_DEFS.forEach(def => {
+        const el = document.getElementById(def.selector);
+        if (el) el.classList.toggle('hidden', !allowed.has(def.key));
+      });
+
+      // Minimal satu tab navigasi harus tetap tampil.
+      const dashEl = document.getElementById('nav-tab-DASHBOARD');
+      const grapariEl = document.getElementById('nav-tab-GRAPARI');
+      let dashVisible = dashEl ? !dashEl.classList.contains('hidden') : false;
+      const grapariVisible = grapariEl ? !grapariEl.classList.contains('hidden') : false;
+      if (!dashVisible && !grapariVisible && dashEl) {
+        dashEl.classList.remove('hidden');
+        dashVisible = true;
       }
 
-      // Show Last Activity button for Admin
-      const activityBtn = document.getElementById('open-activity-btn');
-      if (activityBtn) {
-        activityBtn.classList.toggle('hidden', !isAdmin);
+      if (typeof window.switchActivePage !== 'function') return;
+      const grapariView = document.getElementById('page-grapari-view');
+      const onGrapari = Boolean(grapariView && !grapariView.classList.contains('hidden'));
+      if (onGrapari && !grapariVisible && dashVisible) {
+        window.switchActivePage('DASHBOARD');
+      } else if (!onGrapari && !dashVisible && grapariVisible) {
+        window.switchActivePage('GRAPARI');
       }
+    }
+
+    window.applyRoleMenuVisibility = function applyRoleMenuVisibility(session) {
+      if (!session) return;
+      const role = session.role;
+      applyMenuVisibilityForRole(role);
+      // Muat konfigurasi terbaru dari server lalu terapkan ulang (best-effort).
+      window.getRoleMenuConfig(false).then(() => {
+        const current = window.getCurrentSession();
+        if (current && current.role === role) applyMenuVisibilityForRole(role);
+      }).catch(() => {});
     };
 
     window.applyAuthenticatedSession = function applyAuthenticatedSession(sessionObj, silent = false) {
@@ -690,6 +819,9 @@
       }
 
       window.syncRolePermissionsUI();
+
+      // Terapkan visibilitas menu sesuai hak akses role user
+      window.applyRoleMenuVisibility(sessionObj);
 
       // Terapkan Fokus Utama otomatis sesuai Site user (dapat diubah manual setelahnya)
       if (typeof window.applyDefaultFocusForUser === 'function') {
@@ -752,14 +884,15 @@
       }
     };
 
-    // Terapkan tema tersimpan segera sebelum body tampil
+    // Terapkan tema tersimpan segera sebelum body tampil.
+    // Default = mode cerah (light); mode gelap hanya bila user memilihnya manual.
     (function initEarlyTheme() {
       try {
         const savedTheme = localStorage.getItem(PULSE_THEME_KEY);
-        if (savedTheme === 'light') {
-          document.documentElement.classList.remove('dark');
-        } else {
+        if (savedTheme === 'dark') {
           document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
         }
       } catch (e) {}
     })();
@@ -912,7 +1045,7 @@
         </button>
 
         <!-- Export Excel -->
-        <button onclick="exportToExcel()"
+        <button id="header-export-btn" onclick="exportToExcel()"
           class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition cursor-pointer"
           title="Export ke Downloads/Daily_Reporting_YYYYMMDD_1.xlsx dengan rumus Excel aktif">
           <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
@@ -1551,9 +1684,8 @@
                 <th class="py-2.5 px-3 text-right">Open</th>
                 <th class="py-2.5 px-3 text-right">In SLA</th>
                 <th class="py-2.5 px-3 text-right">Out SLA</th>
-                <th class="py-2.5 px-3 text-right">SL%</th>
-                <th class="py-2.5 px-3 text-right">CR%</th>
-                <th class="py-2.5 px-3 text-right">Avg TTR</th>
+                <th class="py-2.5 px-3 text-center">Prioritas</th>
+                <th class="py-2.5 px-3 text-right">Alert OSLA (&lt;4j)</th>
               </tr>
             </thead>
             <tbody id="grapari-report-tbody" class="divide-y divide-slate-800/80"></tbody>
@@ -1682,6 +1814,21 @@
             </thead>
             <tbody id="user-mgmt-tbody" class="divide-y divide-slate-800/80"></tbody>
           </table>
+        </div>
+
+        <!-- Hak Akses Menu per Role -->
+        <div class="rounded-xl bg-slate-950/80 border border-slate-800 p-3.5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h5 class="text-sm font-extrabold text-white">Hak Akses Menu per Role</h5>
+              <p class="text-[11px] text-slate-400">Pilih menu yang tampil pada navigasi sesuai role user. Menu aksi khusus (Upload Data, Last Activity, Manajemen User) hanya berlaku untuk role Admin.</p>
+            </div>
+            <button type="button" onclick="saveRoleMenus()"
+              class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer">
+              Simpan Hak Akses Menu
+            </button>
+          </div>
+          <div id="role-menu-matrix" class="space-y-2"></div>
         </div>
       </div>
     </div>
@@ -4292,6 +4439,18 @@
     // =========================================================================
     // RENDERER: REPORT ESKALASI GRAPARI & CODING POOL
     // =========================================================================
+    // Prioritas tertinggi (level terkecil) dari tiket Open pada satu POOL.
+    // Level 1 = paling mendesak (sisa SL < 4 jam). 0 = tidak ada tiket Open berprioritas.
+    function getTopPriorityLevel(ticketList) {
+      let top = 0;
+      ticketList.forEach(t => {
+        const level = Number(t.PRIORITY_LEVEL || 0);
+        if (t.IS_CLOSED || level <= 0) return;
+        if (top === 0 || level < top) top = level;
+      });
+      return top;
+    }
+
     function renderGrapariEscalationPage() {
       const poolTypeFilter = document.getElementById('grapari-pool-type-filter')?.value || 'Grapari';
       const searchKw = (document.getElementById('grapari-search-input')?.value || '').trim().toLowerCase();
@@ -4337,6 +4496,9 @@
       const allMatchedTickets = rowsWithMetrics.flatMap(r => r.tList);
       const agg = computeKpiMetrics(allMatchedTickets);
 
+      const topPriorityLevel = getTopPriorityLevel(allMatchedTickets);
+      const topPriorityMeta = topPriorityLevel > 0 ? PRIORITY_META.find(p => p.level === topPriorityLevel) : null;
+
       const sumCards = document.getElementById('grapari-summary-cards');
       if (sumCards) {
         sumCards.innerHTML = `
@@ -4352,13 +4514,13 @@
             <div class="text-[10px] text-emerald-300">Closed / Open</div>
             <div class="text-base font-extrabold font-mono text-white">${agg.closed} <span class="text-xs text-slate-400">/</span> <span class="text-amber-300">${agg.open}</span></div>
           </div>
-          <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
-            <div class="text-[10px] text-slate-400">SL% Eskalasi</div>
-            <div class="text-base font-extrabold font-mono ${agg.slPct >= TARGET_SL ? 'text-emerald-400' : 'text-red-400'}">${agg.slPct.toFixed(1)}%</div>
+          <div class="rounded-xl bg-slate-950/75 border ${agg.nearOslaOpen > 0 ? 'border-red-500/45' : 'border-slate-800'} p-2.5">
+            <div class="text-[10px] ${agg.nearOslaOpen > 0 ? 'text-red-300' : 'text-slate-400'}">Alert OSLA (&lt;4j)</div>
+            <div class="text-base font-extrabold font-mono ${agg.nearOslaOpen > 0 ? 'text-red-400' : 'text-emerald-400'}">${agg.nearOslaOpen}</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
-            <div class="text-[10px] text-slate-400">Rata-rata TTR</div>
-            <div class="text-base font-extrabold font-mono text-sky-300">${agg.avgTtr.toFixed(1)}j</div>
+            <div class="text-[10px] text-slate-400">Prioritas Tertinggi</div>
+            <div class="text-base font-extrabold font-mono text-white">${topPriorityMeta ? `P${topPriorityMeta.level}` : '—'}</div>
           </div>
         `;
       }
@@ -4366,13 +4528,15 @@
       const tbody = document.getElementById('grapari-report-tbody');
       if (!tbody) return;
       if (rowsWithMetrics.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="py-6 text-center text-slate-400">Tidak ada data POOL yang cocok dengan filter.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="py-6 text-center text-slate-400">Tidak ada data POOL yang cocok dengan filter.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rowsWithMetrics.slice(0, 250).map(({ ref, m }) => {
+      tbody.innerHTML = rowsWithMetrics.slice(0, 250).map(({ ref, tList, m }) => {
         const islClosed = Math.max(0, m.closedInSla);
         const oslTotal = Math.max(0, m.total - islClosed - m.openInSla);
+        const rowPriorityLevel = getTopPriorityLevel(tList);
+        const rowPriorityMeta = rowPriorityLevel > 0 ? PRIORITY_META.find(p => p.level === rowPriorityLevel) : null;
         return `
           <tr class="hover:bg-slate-800/45 transition">
             <td class="py-2 px-3 font-mono font-bold text-orange-300">${escapeHtmlAttr(ref.pool)}</td>
@@ -4395,9 +4559,16 @@
             </td>
             <td class="py-2 px-3 text-right font-mono text-sky-300">${islClosed}</td>
             <td class="py-2 px-3 text-right font-mono text-red-300">${oslTotal}</td>
-            <td class="py-2 px-3 text-right font-mono font-bold ${m.slPct >= TARGET_SL ? 'text-emerald-400' : 'text-red-400'}">${m.total > 0 ? `${m.slPct.toFixed(1)}%` : '-'}</td>
-            <td class="py-2 px-3 text-right font-mono font-bold ${m.crPct >= TARGET_CR ? 'text-emerald-400' : 'text-orange-400'}">${m.total > 0 ? `${m.crPct.toFixed(1)}%` : '-'}</td>
-            <td class="py-2 px-3 text-right font-mono text-sky-300">${m.closed > 0 ? `${m.avgTtr.toFixed(1)}j` : '-'}</td>
+            <td class="py-2 px-3 text-center">
+              ${rowPriorityMeta
+                ? `<span class="px-1.5 py-0.5 rounded font-bold text-[10px] ${rowPriorityMeta.badgeClass}" title="${escapeHtmlAttr(rowPriorityMeta.title)}">P${rowPriorityMeta.level}</span>`
+                : `<span class="text-slate-500">—</span>`}
+            </td>
+            <td class="py-2 px-3 text-right font-mono">
+              ${m.nearOslaOpen > 0
+                ? `<button data-pool-code="${escapeHtmlAttr(ref.pool)}" data-pool-detail="${escapeHtmlAttr(ref.detail)}" data-mode="NEAR_OSLA" onclick="openGrapariPoolModalFromEl(this)" class="px-2 py-0.5 rounded-full bg-red-600 text-white font-bold cursor-pointer" title="Tiket Open dengan sisa SLA kurang dari 4 jam">${m.nearOslaOpen} Alert</button>`
+                : `<span class="text-slate-500">0</span>`}
+            </td>
           </tr>
         `;
       }).join('');
@@ -4575,9 +4746,11 @@
         if (String(t.POOL_CODE || '').trim().toUpperCase() !== code) return false;
         if (mode === 'CLOSED') return t.IS_CLOSED;
         if (mode === 'OPEN') return !t.IS_CLOSED;
+        if (mode === 'NEAR_OSLA') return !t.IS_CLOSED && t.REMAINING_SL_HOURS < 4;
         return true;
       });
-      openDrilldownModalWithTickets(`Eskalasi Pool ${code} — ${detail}`, `Filter: ${mode}`, list);
+      const modeLabel = mode === 'NEAR_OSLA' ? 'Alert OSLA (<4j)' : mode;
+      openDrilldownModalWithTickets(`Eskalasi Pool ${code} — ${detail}`, `Filter: ${modeLabel}`, list);
     };
 
     // User Management Modal Handlers (Admin Only)
@@ -4588,6 +4761,7 @@
       }
       window.resetUserForm();
       window.renderUserManagementTable();
+      window.renderRoleMenuMatrix();
       document.getElementById('user-mgmt-modal')?.classList.remove('hidden');
     };
 
@@ -4707,6 +4881,69 @@
           </td>
         </tr>
       `).join('');
+    };
+
+    // Hak Akses Menu per Role (Admin Only): tampilkan matriks menu x role.
+    window.renderRoleMenuMatrix = async function renderRoleMenuMatrix() {
+      const container = document.getElementById('role-menu-matrix');
+      if (!container) return;
+      container.innerHTML = '<p class="text-[11px] text-slate-400">Memuat hak akses menu...</p>';
+      let cfg;
+      try {
+        cfg = await window.getRoleMenuConfig(true);
+      } catch (error) {
+        cfg = normalizeRoleMenus(PULSE_DEFAULT_ROLE_MENUS);
+      }
+      const adminSet = new Set(cfg.Admin || []);
+      const userSet = new Set(cfg.User || []);
+      container.innerHTML = window.PULSE_MENU_DEFS.map(def => {
+        const adminChecked = adminSet.has(def.key) ? 'checked' : '';
+        const userChecked = userSet.has(def.key) ? 'checked' : '';
+        const userDisabled = def.adminOnly ? 'disabled' : '';
+        return `
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-900/60 border border-slate-800 px-3 py-2">
+            <div class="min-w-[160px]">
+              <p class="text-xs font-bold text-white">${escapeHtmlAttr(def.label)}</p>
+              <p class="text-[10px] text-slate-500 font-mono">${escapeHtmlAttr(def.key)}</p>
+            </div>
+            <div class="flex items-center gap-4">
+              <label class="flex items-center gap-1.5 text-[11px] font-semibold text-orange-300">
+                <input type="checkbox" data-menu-role="Admin" value="${def.key}" ${adminChecked} disabled class="accent-orange-500" />
+                Admin
+              </label>
+              <label class="flex items-center gap-1.5 text-[11px] font-semibold ${def.adminOnly ? 'text-slate-500' : 'text-sky-300'}">
+                <input type="checkbox" data-menu-role="User" value="${def.key}" ${userChecked} ${userDisabled} class="accent-sky-500" />
+                User
+              </label>
+            </div>
+          </div>
+        `;
+      }).join('');
+    };
+
+    window.saveRoleMenus = async function saveRoleMenus() {
+      if (!window.isCurrentUserAdmin()) {
+        window.showToast('Akses ditolak: Hanya Role Admin yang dapat mengubah hak akses menu.', 'error');
+        return;
+      }
+      const container = document.getElementById('role-menu-matrix');
+      if (!container) return;
+      const userMenus = Array.from(container.querySelectorAll('input[data-menu-role="User"]'))
+        .filter(el => el.checked && !el.disabled)
+        .map(el => el.value);
+      const roles = {
+        Admin: window.PULSE_MENU_DEFS.map(d => d.key),
+        User: userMenus
+      };
+      try {
+        const res = await window.pulseAuthRequest('role-menus', { method: 'POST', body: JSON.stringify({ roles }) });
+        window.PULSE_ROLE_MENUS = normalizeRoleMenus(res && res.roles);
+        window.showToast('Hak akses menu per role berhasil disimpan.', 'success');
+        const current = window.getCurrentSession();
+        if (current) applyMenuVisibilityForRole(current.role);
+      } catch (error) {
+        window.showToast(error.message || 'Gagal menyimpan hak akses menu.', 'error');
+      }
     };
 
     // Last Activity Modal Handlers (Admin Only)

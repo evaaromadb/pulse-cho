@@ -63,3 +63,11 @@ CREATE TABLE IF NOT EXISTS pulse_activity_log (
   INDEX idx_pulse_activity_user_time (username, created_at),
   INDEX idx_pulse_activity_time (created_at)
 );
+
+-- Hak akses menu per role (visibilitas navigasi/menu).
+-- Tabel ini juga dibuat otomatis saat runtime bila belum ada.
+CREATE TABLE IF NOT EXISTS pulse_role_menus (
+  role VARCHAR(32) NOT NULL PRIMARY KEY,
+  menus TEXT NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);

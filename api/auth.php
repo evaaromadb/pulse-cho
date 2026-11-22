@@ -311,6 +311,24 @@ try {
         pulseRespond(['ok' => true]);
     }
 
+    if ($action === 'role-menus' && $method === 'GET') {
+        // Semua user yang sudah login boleh membaca konfigurasi menu (untuk navigasi).
+        pulseCurrentUser($pdo);
+        pulseRespond([
+            'menus' => PULSE_MENU_KEYS,
+            'roles' => pulseGetRoleMenus($pdo),
+        ]);
+    }
+
+    if ($action === 'role-menus' && in_array($method, ['POST', 'PUT'], true)) {
+        pulseRequireAllowedOrigin();
+        $currentUser = pulseCurrentUser($pdo);
+        pulseRequireAdmin($currentUser);
+        $payload = pulseReadJsonBody();
+        $roles = is_array($payload['roles'] ?? null) ? $payload['roles'] : [];
+        pulseRespond(['ok' => true, 'roles' => pulseSaveRoleMenus($pdo, $roles)]);
+    }
+
     header('Allow: GET, POST, PUT, DELETE, OPTIONS');
     pulseRespond(['error' => 'Rute atau metode tidak didukung.'], 405);
 } catch (InvalidArgumentException $error) {

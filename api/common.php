@@ -4,6 +4,22 @@ declare(strict_types=1);
 const PULSE_SESSION_COOKIE = 'pulse_cho_session';
 const PULSE_SESSION_TTL_SECONDS = 43200;
 
+// Key menu yang dapat dikonfigurasi hak aksesnya per role (dipakai juga oleh UI).
+const PULSE_MENU_KEYS = [
+    'nav-dashboard',
+    'nav-grapari',
+    'action-export',
+    'action-upload',
+    'action-activity',
+    'action-users',
+];
+
+// Hak akses menu default bila admin belum mengubah konfigurasi.
+const PULSE_DEFAULT_ROLE_MENUS = [
+    'Admin' => ['nav-dashboard', 'nav-grapari', 'action-export', 'action-upload', 'action-activity', 'action-users'],
+    'User' => ['nav-dashboard', 'nav-grapari', 'action-export'],
+];
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('X-Content-Type-Options: nosniff');
@@ -305,6 +321,94 @@ function pulseIsoTime(?string $value): ?string
         return null;
     }
     return gmdate('Y-m-d\TH:i:s\Z', $timestamp);
+}
+
+/**
+ * Pastikan tabel hak akses menu per role tersedia (idempotent, best-effort).
+ * Dibuat otomatis saat runtime agar tidak wajib menjalankan migrasi manual.
+ */
+function pulseEnsureRoleMenus(PDO $pdo): void
+{
+    static $ensured = false;
+    if ($ensured) {
+        return;
+    }
+    $ensured = true;
+    try {
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS pulse_role_menus (
+                role VARCHAR(32) NOT NULL PRIMARY KEY,
+                menus TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )'
+        );
+    } catch (Throwable $error) {
+        // Kegagalan di sini tidak boleh menghentikan alur autentikasi.
+        error_log('Pulse role menus init: ' . $error->getMessage());
+    }
+}
+
+/**
+ * Ambil konfigurasi hak akses menu per role. Selalu mengembalikan nilai default
+ * bila tabel belum tersedia, sehingga login/navigasi tidak pernah gagal.
+ */
+function pulseGetRoleMenus(PDO $pdo): array
+{
+    $result = PULSE_DEFAULT_ROLE_MENUS;
+    try {
+        pulseEnsureRoleMenus($pdo);
+        $rows = $pdo->query('SELECT role, menus FROM pulse_role_menus')->fetchAll();
+        foreach ($rows as $row) {
+            $role = (string) $row['role'];
+            $decoded = json_decode((string) $row['menus'], true);
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $result[$role] = array_values(array_intersect(
+                PULSE_MENU_KEYS,
+                array_map('strval', $decoded)
+            ));
+        }
+    } catch (Throwable $error) {
+        error_log('Pulse role menus read: ' . $error->getMessage());
+        return PULSE_DEFAULT_ROLE_MENUS;
+    }
+    // Admin selalu memiliki seluruh menu agar tidak terkunci dari pengaturan.
+    $result['Admin'] = PULSE_MENU_KEYS;
+    return $result;
+}
+
+/**
+ * Simpan konfigurasi hak akses menu per role (hanya role yang dikenal).
+ * Role Admin dipaksa penuh agar admin tidak dapat mengunci dirinya sendiri.
+ */
+function pulseSaveRoleMenus(PDO $pdo, array $roles): array
+{
+    pulseEnsureRoleMenus($pdo);
+    $cleaned = [];
+    foreach (['Admin', 'User'] as $role) {
+        $keys = $roles[$role] ?? [];
+        if (!is_array($keys)) {
+            $keys = [];
+        }
+        $cleaned[$role] = array_values(array_intersect(
+            PULSE_MENU_KEYS,
+            array_map('strval', $keys)
+        ));
+    }
+    $cleaned['Admin'] = PULSE_MENU_KEYS;
+
+    $statement = $pdo->prepare(
+        'INSERT INTO pulse_role_menus (role, menus) VALUES (:role, :menus)
+         ON DUPLICATE KEY UPDATE menus = VALUES(menus)'
+    );
+    foreach ($cleaned as $role => $keys) {
+        $statement->execute([
+            'role' => $role,
+            'menus' => json_encode($keys),
+        ]);
+    }
+    return $cleaned;
 }
 
 function pulseSetSessionCookie(string $token, int $maxAge): void
