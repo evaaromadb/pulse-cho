@@ -240,7 +240,11 @@ function pulseChatTouchPresence(PDO $pdo, array $user): void
     }
 }
 
-/** Daftar user aktif (polling <= 3 menit terakhir), selain user yang sedang login. */
+/**
+ * Daftar user aktif (heartbeat <= 3 menit terakhir), selain user yang sedang login.
+ * Sengaja TANPA filter role: semua user (Admin, PIC WhatsApp, User, dst.) yang aktif
+ * ikut ditampilkan selama presence-nya masih segar.
+ */
 function pulseChatActiveUsers(PDO $pdo, string $me): array
 {
     $statement = $pdo->prepare(
@@ -394,8 +398,20 @@ try {
     if ($method === 'GET') {
         $user = pulseCurrentUser($pdo);
         $me = (string) $user['username'];
+        // Setiap request chat memperbarui heartbeat presence user (login awal & setiap polling).
         pulseChatTouchPresence($pdo, $user);
         pulseChatCleanup($pdo);
+
+        // Heartbeat ringan (?presence=1): cukup perbarui presence lalu kirim daftar user aktif
+        // + unread, tanpa memuat pesan. Dipakai agar semua user yang login (termasuk Admin &
+        // PIC WhatsApp) tetap terdeteksi aktif meski jendela chat sedang tertutup.
+        if (!empty($_GET['presence'])) {
+            pulseRespond([
+                'presence' => pulseChatActiveUsers($pdo, $me),
+                'unread' => pulseChatUnread($pdo, $me),
+                'server_time' => time(),
+            ]);
+        }
 
         $peer = trim((string) ($_GET['peer'] ?? ''));
         if (strcasecmp($peer, $me) === 0) {
@@ -462,6 +478,8 @@ try {
         pulseRequireAllowedOrigin();
         $user = pulseCurrentUser($pdo);
         $me = (string) $user['username'];
+        // Heartbeat presence juga diperbarui pada setiap aksi POST (kirim/edit/hapus).
+        pulseChatTouchPresence($pdo, $user);
         $payload = pulseReadJsonBody();
         $action = strtolower(trim((string) ($payload['action'] ?? 'send')));
         if ($action === '') {
@@ -485,7 +503,6 @@ try {
                 pulseRespond(['error' => 'Pesan maksimal 500 karakter.'], 400);
             }
             $tags = pulseChatExtractTags($pdo, $message);
-            pulseChatTouchPresence($pdo, $user);
             pulseChatCleanup($pdo);
             $insert = $pdo->prepare(
                 'INSERT INTO pulse_chat (username, full_name, site, role, message, peer_a, peer_b, tagged)

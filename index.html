@@ -985,7 +985,7 @@
       <form id="pulse-chat-form" onsubmit="return sendChatMessage(event)" class="relative p-1.5 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
         <div id="pulse-chat-mention" class="hidden absolute bottom-full left-1.5 right-1.5 mb-1 max-h-40 overflow-y-auto rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl"></div>
         <div class="flex items-end gap-1.5">
-          <textarea id="pulse-chat-input" rows="1" maxlength="500" placeholder="Tulis pesan... (@ untuk tag)" class="flex-1 resize-none px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[13px] text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-orange-500"></textarea>
+          <textarea id="pulse-chat-input" rows="1" maxlength="500" placeholder="Tulis pesan... (@ untuk tag)" class="flex-1 resize-none px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-[14px] leading-[1.4] text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-orange-500"></textarea>
           <button type="submit" class="shrink-0 w-8 h-8 rounded-lg bg-orange-500 hover:bg-orange-600 text-white flex items-center justify-center text-xs transition disabled:opacity-50" title="Kirim">➤</button>
         </div>
         <p id="pulse-chat-counter" class="text-right text-[9px] text-slate-400 mt-0.5">0/500</p>
@@ -5588,6 +5588,7 @@
     // LIVE CHAT RINGAN (polling 8 detik, hanya saat login & tab aktif)
     // =========================================================================
     const PULSE_CHAT_POLL_MS = 8000;
+    const PULSE_CHAT_HEARTBEAT_MS = 45000; // heartbeat presence (tetap jalan walau jendela chat tertutup)
     const PULSE_CHAT_MUTE_KEY = 'pulse_cho_chat_muted_v1';
     const PULSE_CHAT_MAX_LEN = 500;
     const PULSE_CHAT_EDIT_WINDOW_SEC = 120; // batas edit/hapus pesan sendiri (2 menit)
@@ -5608,6 +5609,7 @@
       mentionItems: [],
       mentionIndex: 0,
       pollTimer: null,
+      heartbeatTimer: null,
       serverOffset: 0
     };
 
@@ -6030,13 +6032,15 @@
       meta.textContent = chatMetaText(msg);
 
       const bubble = document.createElement('div');
-      let bubbleClass = 'pulse-chat-bubble max-w-[85%] px-2.5 py-1.5 rounded-2xl text-[13px] whitespace-pre-wrap break-words ';
+      // Gaya ala WhatsApp: latar putih bersih (#FFFFFF) + garis tepi tipis 1px (bukan blok warna penuh),
+      // ukuran teks 14px / line-height 1.4, dan teks dapat diblok & di-copy (user-select: text).
+      let bubbleClass = 'pulse-chat-bubble max-w-[85%] px-2.5 py-1.5 rounded-2xl border text-[14px] leading-[1.4] whitespace-pre-wrap break-words select-text ';
       if (isMine) {
-        bubbleClass += 'rounded-br-sm bg-orange-500 text-white';
+        bubbleClass += 'rounded-br-sm bg-white dark:bg-slate-800 border-orange-300 dark:border-orange-500/60 text-slate-800 dark:text-slate-100';
       } else if (isChatMentionOfMe(msg)) {
-        bubbleClass += 'rounded-bl-sm bg-amber-100 dark:bg-amber-500/20 text-slate-800 dark:text-amber-50 ring-2 ring-amber-400';
+        bubbleClass += 'rounded-bl-sm bg-white dark:bg-slate-800 border-amber-400 ring-1 ring-amber-400 text-slate-800 dark:text-slate-100';
       } else {
-        bubbleClass += 'rounded-bl-sm bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-100';
+        bubbleClass += 'rounded-bl-sm bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100';
       }
       bubble.className = bubbleClass;
       bubble.textContent = msg.message;
@@ -6146,7 +6150,7 @@
       editor.rows = 2;
       editor.maxLength = PULSE_CHAT_MAX_LEN;
       editor.value = bubble.textContent || '';
-      editor.className = 'w-full resize-none px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-orange-400 text-[13px] text-slate-800 dark:text-slate-100 focus:outline-none';
+      editor.className = 'w-full resize-none px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-orange-400 text-[14px] leading-[1.4] text-slate-800 dark:text-slate-100 focus:outline-none';
       const buttons = document.createElement('div');
       buttons.className = 'flex justify-end gap-1';
       const cancelBtn = document.createElement('button');
@@ -6320,6 +6324,43 @@
       }
     }
 
+    // ---------- Heartbeat presence (agar user selalu terdeteksi aktif) ----------
+    // Berbeda dengan polling pesan, heartbeat tetap berjalan meski tab/jendela chat
+    // tidak sedang tampil, sehingga semua user yang login (Admin, PIC WhatsApp, dst.)
+    // tetap segar pada daftar User Aktif.
+    async function sendChatHeartbeat() {
+      if (!pulseChatState.active) return;
+      try {
+        const base = (window.PULSE_API_BASE_URL || '').replace(/\/+$/, '');
+        const res = await fetch(`${base}/chat.php?presence=1`, { credentials: 'include' });
+        if (!res.ok) {
+          if (res.status === 401) window.stopPulseChat();
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        syncChatServerTime(data);
+        if (Array.isArray(data.presence)) pulseChatState.presence = data.presence;
+        if (data.unread && typeof data.unread === 'object') {
+          pulseChatState.unread = {
+            group: Number(data.unread.group) || 0,
+            dms: (data.unread.dms && typeof data.unread.dms === 'object') ? data.unread.dms : {}
+          };
+        }
+        if (pulseChatState.tab === 'users') renderChatUsers();
+        updateChatBadges();
+      } catch (e) {}
+    }
+    function startChatHeartbeat() {
+      stopChatHeartbeat();
+      pulseChatState.heartbeatTimer = setInterval(sendChatHeartbeat, PULSE_CHAT_HEARTBEAT_MS);
+    }
+    function stopChatHeartbeat() {
+      if (pulseChatState.heartbeatTimer) {
+        clearInterval(pulseChatState.heartbeatTimer);
+        pulseChatState.heartbeatTimer = null;
+      }
+    }
+
     // ---------- Buka / tutup jendela ----------
     window.toggleChatWindow = function toggleChatWindow() {
       const panel = document.getElementById('pulse-chat-panel');
@@ -6422,8 +6463,10 @@
       renderChatLayout();
       updateChatCounter();
       setChatStatus('Menghubungkan...');
+      sendChatHeartbeat();
       fetchChatMessages();
       startChatPolling();
+      startChatHeartbeat();
     };
 
     window.stopPulseChat = function stopPulseChat() {
@@ -6436,6 +6479,7 @@
       pulseChatState.unread = { group: 0, dms: {} };
       pulseChatState.presence = [];
       stopChatPolling();
+      stopChatHeartbeat();
       hideMentionSuggest();
       const panel = document.getElementById('pulse-chat-panel');
       if (panel) {
@@ -6456,7 +6500,10 @@
       document.addEventListener('pointerdown', pulseChatUnlockAudio);
       document.addEventListener('keydown', pulseChatUnlockAudio);
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && pulseChatState.active) fetchChatMessages();
+        if (!document.hidden && pulseChatState.active) {
+          sendChatHeartbeat();
+          fetchChatMessages();
+        }
       });
       const input = document.getElementById('pulse-chat-input');
       if (input) {
