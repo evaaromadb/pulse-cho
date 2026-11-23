@@ -3171,6 +3171,87 @@
       return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
+    // =========================================================================
+    // ZONA WAKTU WIB (Asia/Jakarta, UTC+07:00) — ACUAN PERHITUNGAN TTR / OSLA
+    // Nilai sumber (tanpa zona eksplisit) diartikan seragam sebagai wall-clock WIB,
+    // sehingga sisa waktu = (CASE_DUE_DATETIME - sekarang) selalu konsisten.
+    // =========================================================================
+    const PULSE_WIB_OFFSET_MS = 7 * 60 * 60 * 1000; // WIB = UTC+7 (tanpa DST)
+
+    // Ekstrak komponen wall-clock (Y, M, D, H, Mi, S) dari nilai sumber apa pun.
+    // Mendukung: Date, serial tanggal Excel, "MM/DD/YYYY HH:mm", "YYYY-MM-DD HH:mm:ss",
+    // ISO/timestamp (dengan atau tanpa offset zona eksplisit Z / ±HH:MM).
+    function extractWibWallClockParts(val) {
+      if (val === undefined || val === null || val === '') return null;
+
+      if (val instanceof Date) {
+        if (isNaN(val.getTime())) return null;
+        // Pada browser WIB, komponen lokal == wall-clock WIB (identik dengan perilaku lama).
+        return { y: val.getFullYear(), mo: val.getMonth(), d: val.getDate(), h: val.getHours(), mi: val.getMinutes(), s: val.getSeconds() };
+      }
+
+      // Serial tanggal Excel (tanpa info zona) -> wall-clock WIB.
+      if (typeof val === 'number' && val > 20000 && val < 90000) {
+        const utcDays = Math.floor(val - 25569);
+        const frac = val - Math.floor(val);
+        const dt = new Date((utcDays * 86400 + Math.round(frac * 86400)) * 1000);
+        return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth(), d: dt.getUTCDate(), h: dt.getUTCHours(), mi: dt.getUTCMinutes(), s: dt.getUTCSeconds() };
+      }
+
+      const str = String(val).trim();
+      if (!str) return null;
+
+      // Timestamp/ISO dengan offset zona eksplisit (Z atau ±HH:MM) -> instan absolut.
+      // Konversi ke wall-clock WIB agar round-trip tetap tepat.
+      if (/(?:Z|[+-]\d{2}:?\d{2})\s*$/i.test(str)) {
+        const abs = new Date(str);
+        if (!isNaN(abs.getTime())) {
+          const wib = new Date(abs.getTime() + PULSE_WIB_OFFSET_MS);
+          return { y: wib.getUTCFullYear(), mo: wib.getUTCMonth(), d: wib.getUTCDate(), h: wib.getUTCHours(), mi: wib.getUTCMinutes(), s: wib.getUTCSeconds() };
+        }
+      }
+
+      // YYYY-MM-DD HH:mm(:ss) / ISO tanpa offset (wall-clock WIB).
+      let m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+      if (m) {
+        return { y: +m[1], mo: +m[2] - 1, d: +m[3], h: +(m[4] || 0), mi: +(m[5] || 0), s: +(m[6] || 0) };
+      }
+
+      // MM/DD/YYYY HH:mm(:ss) — format utama sumber CHO; baru dianggap DD/MM/YYYY
+      // bila bagian pertama > 12 (mis. 23/11/2026), sehingga tidak tertukar.
+      m = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+      if (m) {
+        const p1 = +m[1];
+        const p2 = +m[2];
+        const isDayFirst = p1 > 12;
+        return {
+          y: +m[3],
+          mo: (isDayFirst ? p2 : p1) - 1,
+          d: isDayFirst ? p1 : p2,
+          h: +(m[4] || 0),
+          mi: +(m[5] || 0),
+          s: +(m[6] || 0)
+        };
+      }
+
+      const fb = new Date(str);
+      if (isNaN(fb.getTime())) return null;
+      return { y: fb.getFullYear(), mo: fb.getMonth(), d: fb.getDate(), h: fb.getHours(), mi: fb.getMinutes(), s: fb.getSeconds() };
+    }
+
+    // Konversi wall-clock WIB -> Date (epoch nyata, tz-independent).
+    function wibWallClockToDate(parts) {
+      if (!parts) return null;
+      const epochMs = Date.UTC(parts.y, parts.mo, parts.d, parts.h, parts.mi, parts.s) - PULSE_WIB_OFFSET_MS;
+      const dt = new Date(epochMs);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    // Parser khusus CASE_DUE_DATETIME: selalu diartikan sebagai wall-clock WIB.
+    function parseDueDatetimeWIB(val) {
+      return wibWallClockToDate(extractWibWallClockParts(val));
+    }
+
     function parseFlexibleDate(val) {
       if (!val) return null;
       if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -3485,9 +3566,18 @@
     function getRemainingHours(ticket) {
       const due = ticket.CASE_DUE_DATETIME;
       if (due instanceof Date && !isNaN(due.getTime())) {
-        return (due.getTime() - Date.now()) / 3600000;
+        // Selisih milidetik (CASE_DUE_DATETIME WIB - waktu saat ini) lalu dikonversi ke jam desimal.
+        const diffMs = due.getTime() - Date.now();
+        return (diffMs / 1000) / 3600;
       }
       return Number(ticket.REMAINING_SL_HOURS || 0);
+    }
+
+    // Format tampilan sisa TTR/OSLA: nilai negatif (sudah lewat CASE_DUE_DATETIME) ditampilkan
+    // sebagai "Lewat X.XXj" agar tidak membingungkan; 2 angka di belakang koma.
+    function formatRemainingTtr(ticket) {
+      const rem = getRemainingHours(ticket);
+      return rem < 0 ? `Lewat ${Math.abs(rem).toFixed(2)}j` : `Sisa ${rem.toFixed(2)}j`;
     }
 
     // Alert OSLA murni: tiket Open dengan 0 <= sisa_jam < 4 (tiket lewat batas / minus dikecualikan).
@@ -3607,7 +3697,9 @@
         const slaStartDate = parseFlexibleDate(pickFirstValue(raw, [
           'CASE_SLA_START_DATETIME', 'SLA_START_DATETIME', 'TANGGAL', 'CREATED_DATE'
         ])) || createdDate;
-        const dueDate = parseFlexibleDate(pickFirstValue(raw, [
+        // CASE_DUE_DATETIME selalu diparse sebagai wall-clock WIB (Asia/Jakarta) agar
+        // sisa waktu TTR/OSLA konsisten dengan waktu berjalan saat ini.
+        const dueDate = parseDueDatetimeWIB(pickFirstValue(raw, [
           'CASE_DUE_DATETIME', 'DUE_DATE', 'SLA_DUE_DATETIME'
         ])) || new Date(slaStartDate.getTime() + 72 * 3600000);
         const closeDate = parseFlexibleDate(pickFirstValue(raw, [
@@ -4673,7 +4765,7 @@
             <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
             <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
           </td>
-          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : `Sisa ${getRemainingHours(t).toFixed(2)}j`}</td>
+          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : formatRemainingTtr(t)}</td>
           <td class="py-2 px-2.5 text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
           <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
         </tr>
@@ -5153,7 +5245,7 @@
         const statusSla = `${t.CASE_STATUS} / ${t.SLA_STATUS}`;
         const sisaSlTtr = t.IS_CLOSED
           ? `${Number(t.TTR_HOURS || 0).toFixed(2)} j (TTR)`
-          : `Sisa ${getRemainingHours(t).toFixed(2)} j`;
+          : formatRemainingTtr(t).replace('j', ' j');
         return {
           'CASE_ID': t.CASE_ID,
           'UNIT_NAME': t.UNIT_NAME,
@@ -5236,7 +5328,7 @@
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
               <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
             </td>
-            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : `Sisa ${getRemainingHours(t).toFixed(2)}j`}</td>
+            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : formatRemainingTtr(t)}</td>
             <td class="py-2 px-2.5 text-slate-200 max-w-[200px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
             <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
             <td class="py-2 px-2.5 pii-col hidden text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(renderPiiMaskedCell(t))}">${escapeHtmlAttr(renderPiiMaskedCell(t))}</td>
