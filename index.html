@@ -236,6 +236,51 @@
       border-color: #6ee7b7 !important;
     }
 
+    /* Aksen angka & badge di dalam MODAL (Drilldown & User Management) pada Mode Terang:
+       kelas -300/-400 terlalu terang di atas latar putih, diganti shade gelap agar kontras. */
+    html:not(.dark) #drilldown-modal .text-orange-300,
+    html:not(.dark) #drilldown-modal .text-orange-400,
+    html:not(.dark) #user-mgmt-modal .text-orange-300,
+    html:not(.dark) #user-mgmt-modal .text-orange-400 {
+      color: #c2410c !important;
+    }
+    html:not(.dark) #drilldown-modal .text-sky-300,
+    html:not(.dark) #drilldown-modal .text-sky-400,
+    html:not(.dark) #drilldown-modal .text-blue-300,
+    html:not(.dark) #drilldown-modal .text-blue-400,
+    html:not(.dark) #user-mgmt-modal .text-sky-300,
+    html:not(.dark) #user-mgmt-modal .text-sky-400,
+    html:not(.dark) #user-mgmt-modal .text-blue-300,
+    html:not(.dark) #user-mgmt-modal .text-blue-400 {
+      color: #0369a1 !important;
+    }
+    html:not(.dark) #drilldown-modal .text-emerald-300,
+    html:not(.dark) #drilldown-modal .text-emerald-400,
+    html:not(.dark) #user-mgmt-modal .text-emerald-300,
+    html:not(.dark) #user-mgmt-modal .text-emerald-400 {
+      color: #047857 !important;
+    }
+    html:not(.dark) #drilldown-modal .text-amber-300,
+    html:not(.dark) #user-mgmt-modal .text-amber-300 {
+      color: #b45309 !important;
+    }
+    html:not(.dark) #drilldown-modal .text-red-300,
+    html:not(.dark) #drilldown-modal .text-red-400,
+    html:not(.dark) #user-mgmt-modal .text-red-300,
+    html:not(.dark) #user-mgmt-modal .text-red-400 {
+      color: #b91c1c !important;
+    }
+    /* Jaga teks putih pada badge/tombol berwarna di dalam modal Mode Terang */
+    html:not(.dark) #drilldown-modal :is(.bg-red-600, .bg-orange-500, .bg-sky-600, .bg-blue-600, .bg-emerald-600).text-white,
+    html:not(.dark) #user-mgmt-modal :is(.bg-red-600, .bg-orange-500, .bg-sky-600, .bg-blue-600, .bg-emerald-600).text-white {
+      color: #ffffff !important;
+    }
+    /* Badge transparan aksen: latar dipaskan lembut agar teks gelap tetap terbaca */
+    html:not(.dark) #drilldown-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20),
+    html:not(.dark) #user-mgmt-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20) {
+      background-color: #f1f5f9 !important;
+    }
+
     html:not(.dark) main #input-target-sl,
     html:not(.dark) main #input-target-cr,
     html:not(.dark) main #input-target-ttr,
@@ -1712,16 +1757,16 @@
             </div>
             <select id="ana-sla-filter" onchange="renderCaseAnalysisSection()"
               class="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-[11px] font-semibold text-slate-200 focus:outline-none focus:border-orange-500 cursor-pointer">
-              <option value="ALL">Semua SLA</option>
-              <option value="ISL">In SLA</option>
+              <option value="ALL">All SLA</option>
               <option value="OSL">Out SLA</option>
+              <option value="ISL">In SLA</option>
             </select>
           </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-2.5 mb-2.5">
-          <div class="lg:col-span-6">
-            <div class="text-[10px] font-bold tracking-wide text-orange-600 mb-1">Filter Cepat CASE_ID</div>
+          <div class="lg:col-span-4">
+            <div class="text-[10px] font-bold tracking-wide text-orange-700 dark:text-orange-300 mb-1">Filter Cepat CASE_ID (ID Case)</div>
             <div class="relative">
               <input id="case-analysis-caseid" type="text" oninput="renderCaseAnalysisSection()"
                 placeholder="Ketik CASE_ID (eksak atau sebagian, otomatis abaikan besar/kecil huruf)..."
@@ -1735,7 +1780,7 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-2.5 mb-3">
-          <div class="lg:col-span-6 relative">
+          <div class="lg:col-span-4 relative">
             <input id="case-analysis-search" type="text" oninput="renderCaseAnalysisSection()"
               placeholder="Ketik kata kunci pencarian (contoh: jaringan, kuota, eskalasi, konfirmasi, sinyal)..."
               class="w-full px-3.5 py-2 pr-16 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-orange-500" />
@@ -1744,7 +1789,7 @@
               Reset
             </button>
           </div>
-          <div class="lg:col-span-3">
+          <div class="lg:col-span-4">
             <select id="case-analysis-field" onchange="renderCaseAnalysisSection()"
               class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs font-semibold text-slate-200 focus:outline-none focus:border-orange-500 cursor-pointer">
               <option value="BOTH">Cari di: CASE_TYPE_3 &amp; CASE_NOTES</option>
@@ -1752,7 +1797,7 @@
               <option value="NOTES">Hanya Kolom CASE_NOTES</option>
             </select>
           </div>
-          <div class="lg:col-span-3 flex items-center gap-2">
+          <div class="lg:col-span-4 flex items-center gap-2">
             <button type="button" onclick="openAnalysisDrilldownModal()"
               class="flex-1 py-2 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition cursor-pointer">
               Buka Modal (<span id="ana-btn-count">0</span>) ↗
@@ -1775,7 +1820,7 @@
           <button type="button" onclick="applyQuickAnalysisKeyword('pengecekan')" class="px-2 py-0.5 rounded-full bg-slate-800 hover:bg-orange-500/25 text-slate-200 border border-slate-700 cursor-pointer">pengecekan</button>
         </div>
 
-        <div id="case-analysis-summary" class="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-3"></div>
+        <div id="case-analysis-summary" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-3"></div>
 
         <div class="overflow-x-auto rounded-xl border border-slate-800">
           <table class="w-full text-left border-collapse text-xs">
@@ -2629,7 +2674,7 @@
       POOL_LOOKUP_MAP.set(String(item.pool).trim().toUpperCase(), item);
     });
 
-    const POOL_CATEGORIES = ['Remedi Network', 'Remedi IT', 'Bes HQ', 'Bes Fixed', 'CC Semarang', 'CC Bandung', 'Other'];
+    const POOL_CATEGORIES = ['Remedy Network', 'Remedy IT', 'Bes HQ', 'Bes Fixed', 'CC Semarang', 'CC Bandung', 'Other'];
 
     const PRIORITY_META = [
       { level: 1, title: 'Prioritas 1: All case yang sisa SL < 4 Jam', badgeClass: 'bg-red-600 text-white' },
@@ -3504,8 +3549,8 @@
         const ref = POOL_LOOKUP_MAP.get(up);
         const np = String(ref.namaPool || '').trim();
         const lowRef = np.toLowerCase();
-        if (lowRef.includes('remedy network') || lowRef.includes('remedi network')) return 'Remedi Network';
-        if (lowRef.includes('remedy it') || lowRef.includes('remedi it')) return 'Remedi IT';
+        if (lowRef.includes('remedy network') || lowRef.includes('remedi network')) return 'Remedy Network';
+        if (lowRef.includes('remedy it') || lowRef.includes('remedi it')) return 'Remedy IT';
         if (lowRef.includes('bes hq') || lowRef.includes('beshq')) return 'Bes HQ';
         if (lowRef.includes('bes fixed')) return 'Bes Fixed';
         if (lowRef.includes('cc semarang')) return 'CC Semarang';
@@ -3514,8 +3559,8 @@
       }
 
       const low = p.toLowerCase();
-      if (low.includes('remedi network') || low.includes('remedy network')) return 'Remedi Network';
-      if (low.includes('remedi it') || low.includes('remedy it')) return 'Remedi IT';
+      if (low.includes('remedi network') || low.includes('remedy network')) return 'Remedy Network';
+      if (low.includes('remedi it') || low.includes('remedy it')) return 'Remedy IT';
       if (low.includes('bes hq') || low.includes('beshq')) return 'Bes HQ';
       if (low.includes('bes fixed')) return 'Bes Fixed';
       if (low.includes('cc semarang')) return 'CC Semarang';
@@ -4717,12 +4762,22 @@
       if (btnCnt) btnCnt.textContent = currentAnalysisMatches.length.toLocaleString('id-ID');
 
       const m = computeKpiMetrics(currentAnalysisMatches);
+      const outSlaTotal = currentAnalysisMatches.filter(t => t.IS_OUT_SLA).length;
+      const inSlaTotal = currentAnalysisMatches.length - outSlaTotal;
       const summaryEl = document.getElementById('case-analysis-summary');
       if (summaryEl) {
         summaryEl.innerHTML = `
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400">Total Match</div>
             <div class="text-base font-extrabold font-mono text-white">${m.total}</div>
+          </div>
+          <div class="rounded-xl bg-slate-950/75 border border-red-500/40 p-2.5">
+            <div class="text-[10px] text-slate-400">Total Out SLA</div>
+            <div class="text-base font-extrabold font-mono text-red-300">${outSlaTotal}</div>
+          </div>
+          <div class="rounded-xl bg-slate-950/75 border border-sky-500/40 p-2.5">
+            <div class="text-[10px] text-slate-400">Total In SLA</div>
+            <div class="text-base font-extrabold font-mono text-sky-300">${inSlaTotal}</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400">Closed</div>
