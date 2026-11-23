@@ -2073,24 +2073,8 @@
         </div>
       </div>
 
-      <div class="overflow-auto flex-1 p-2.5 sm:p-3">
-        <table class="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr class="bg-slate-950/60 text-slate-300 border-b border-slate-800 font-semibold">
-              <th class="py-2 px-2.5">CASE_ID</th>
-              <th class="py-2 px-2.5">UNIT_NAME</th>
-              <th class="py-2 px-2.5">POOL</th>
-              <th class="py-2 px-2.5">ID Remedy</th>
-              <th class="py-2 px-2.5">Prioritas</th>
-              <th class="py-2 px-2.5">Status / SLA</th>
-              <th class="py-2 px-2.5 text-right">Sisa SL / TTR</th>
-              <th class="py-2 px-2.5">KIP (CASE_TYPE_3)</th>
-              <th class="py-2 px-2.5">CASE_NOTES</th>
-              <th class="py-2 px-2.5 pii-col hidden">Data Pelanggan (Masked)</th>
-            </tr>
-          </thead>
-          <tbody id="modal-tickets-tbody" class="divide-y divide-slate-800/80"></tbody>
-        </table>
+      <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2.5 sm:p-3">
+        <div id="modal-tickets-tbody" class="grid grid-cols-1 xl:grid-cols-2 gap-2.5"></div>
       </div>
     </div>
   </div>
@@ -3297,6 +3281,19 @@
       return wibWallClockToDate(extractWibWallClockParts(val));
     }
 
+    // Formatter tanggal + jam (WIB) untuk detail case pada modal drill-down.
+    // - mode 'wall'   : nilai Date hasil parse wall-clock sumber → baca komponen lokal (tanggal & jam sumber apa adanya).
+    // - mode 'instant': nilai Date instan nyata (mis. CASE_DUE_DATETIME) → konversi ke wall-clock WIB.
+    function pad2Num(n) { return String(n).padStart(2, '0'); }
+    function formatCaseDateTime(val, mode) {
+      if (!(val instanceof Date) || isNaN(val.getTime())) return '-';
+      if (mode === 'instant') {
+        const w = new Date(val.getTime() + PULSE_WIB_OFFSET_MS);
+        return `${pad2Num(w.getUTCDate())}/${pad2Num(w.getUTCMonth() + 1)}/${w.getUTCFullYear()} ${pad2Num(w.getUTCHours())}:${pad2Num(w.getUTCMinutes())} WIB`;
+      }
+      return `${pad2Num(val.getDate())}/${pad2Num(val.getMonth() + 1)}/${val.getFullYear()} ${pad2Num(val.getHours())}:${pad2Num(val.getMinutes())} WIB`;
+    }
+
     function parseFlexibleDate(val) {
       if (!val) return null;
       if (val instanceof Date && !isNaN(val.getTime())) return val;
@@ -3750,6 +3747,11 @@
         const closeDate = parseFlexibleDate(pickFirstValue(raw, [
           'CLOSE_DT', 'CLOSED_DT', 'CLOSED_DATETIME', 'CLOSE_DATE', 'CLOSED_DATE'
         ]));
+        // Tanggal/waktu tiket dibuat/dieskalasikan (kolom CASE_CREATION_DATETIME).
+        // Hanya untuk kolom tampilan detail; tidak mengubah perhitungan TTR/SLA yang ada.
+        const creationDate = parseFlexibleDate(pickFirstValue(raw, [
+          'CASE_CREATION_DATETIME', 'CASE_CREATED_DATETIME', 'CREATION_DATETIME', 'CREATED_DATETIME', 'CASE_CREATE_DT', 'CREATE_DATETIME'
+        ])) || createdDate;
 
         const statusRaw = String(pickFirstValue(raw, ['CASE_STATUS', 'STATUS', 'TICKET_STATUS']) || 'Open').trim();
         const isClosed = statusRaw.toLowerCase() === 'closed';
@@ -3807,6 +3809,7 @@
           CASE_SLA_START_DATETIME: slaStartDate,
           CASE_DUE_DATETIME: dueDate,
           CLOSE_DT: closeDate,
+          CASE_CREATION_DATETIME: creationDate,
           CASE_STATUS: statusRaw,
           CASE_SUBSTATUS: substatus,
           SLA_STATUS: isOutSla ? 'Out SLA' : 'In SLA',
@@ -5363,31 +5366,50 @@
       const tbody = document.getElementById('modal-tickets-tbody');
       if (!tbody) return;
       if (list.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="py-6 text-center text-slate-400">Tidak ada tiket untuk ditampilkan.</td></tr>`;
+        tbody.innerHTML = `<div class="col-span-full py-6 text-center text-slate-400">Tidak ada tiket untuk ditampilkan.</div>`;
         return;
       }
+      // Kartu detail responsif: 1 kolom (mobile) → 2 kolom (layar lebar).
+      // Semua teks panjang dibungkus (break-words/break-all) & tanpa scroll horizontal.
+      const fieldCell = (label, valueHtml, valueClass = '') => `
+        <div class="min-w-0">
+          <div class="text-[10px] text-slate-400">${label}</div>
+          <div class="text-[11px] text-slate-200 break-words ${valueClass}">${valueHtml}</div>
+        </div>`;
       tbody.innerHTML = list.slice(0, 300).map(t => {
         const prioMeta = PRIORITY_META.find(p => p.level === t.PRIORITY_LEVEL);
         const prioBadge = t.PRIORITY_LEVEL > 0
           ? `<span class="px-1.5 py-0.5 rounded font-bold text-[10px] ${prioMeta ? prioMeta.badgeClass : 'bg-orange-500 text-white'}">P${t.PRIORITY_LEVEL}</span>`
           : '<span class="text-slate-500">Closed</span>';
         const poolDisplay = t.POOL_LOOKUP ? `${t.POOL_CODE} (${t.POOL_LOOKUP.detail})` : (t.POOL_CODE || t.POOL);
+        const closeDtDisplay = t.CLOSE_DT ? formatCaseDateTime(t.CLOSE_DT, 'wall') : '-';
         return `
-          <tr class="hover:bg-slate-800/45">
-            <td class="py-2 px-2.5 font-mono font-bold text-orange-300">${escapeHtmlAttr(t.CASE_ID)}</td>
-            <td class="py-2 px-2.5 font-semibold text-white">${escapeHtmlAttr(t.UNIT_NAME)}</td>
-            <td class="py-2 px-2.5 text-slate-300 max-w-[180px] truncate" title="${escapeHtmlAttr(poolDisplay)}">${escapeHtmlAttr(poolDisplay)}</td>
-            <td class="py-2 px-2.5 font-mono text-[11px] ${t.ID_REMEDY !== '-' ? 'text-sky-300 font-semibold' : 'text-slate-500'}">${escapeHtmlAttr(t.ID_REMEDY)}</td>
-            <td class="py-2 px-2.5 font-mono">${prioBadge}</td>
-            <td class="py-2 px-2.5">
+          <article class="rounded-xl border border-slate-800 bg-slate-950/60 p-3 min-w-0">
+            <div class="flex flex-wrap items-center gap-1.5 mb-2">
+              <span class="font-mono font-bold text-orange-300 break-all">${escapeHtmlAttr(t.CASE_ID)}</span>
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
-              <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
-            </td>
-            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : formatRemainingTtr(t)}</td>
-            <td class="py-2 px-2.5 text-slate-200 max-w-[200px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
-            <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
-            <td class="py-2 px-2.5 pii-col hidden text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(renderPiiMaskedCell(t))}">${escapeHtmlAttr(renderPiiMaskedCell(t))}</td>
-          </tr>
+              <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${escapeHtmlAttr(t.SLA_STATUS)}</span>
+              ${prioBadge}
+              <span class="ml-auto font-mono text-[11px] text-slate-300">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : formatRemainingTtr(t)}</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-2">
+              ${fieldCell('Case Create', escapeHtmlAttr(formatCaseDateTime(t.CASE_CREATION_DATETIME, 'wall')))}
+              ${fieldCell('CASE_DUE_DATETIME', escapeHtmlAttr(formatCaseDateTime(t.CASE_DUE_DATETIME, 'instant')))}
+              ${fieldCell('CLOSE_DT', escapeHtmlAttr(closeDtDisplay), t.CLOSE_DT ? '' : 'text-slate-500')}
+              ${fieldCell('UNIT_NAME', escapeHtmlAttr(t.UNIT_NAME), 'font-sans font-semibold text-white')}
+              ${fieldCell('POOL', escapeHtmlAttr(poolDisplay), 'font-sans')}
+              ${fieldCell('ID Remedy', escapeHtmlAttr(t.ID_REMEDY), t.ID_REMEDY !== '-' ? 'text-sky-300 font-semibold' : 'text-slate-500')}
+              ${fieldCell('KIP (CASE_TYPE_3)', escapeHtmlAttr(t.CASE_TYPE_3), 'font-sans')}
+            </div>
+            <div class="mt-2 min-w-0">
+              <div class="text-[10px] text-slate-400 mb-0.5">CASE_NOTES</div>
+              <p class="text-[11px] text-slate-300 whitespace-pre-wrap break-words">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</p>
+            </div>
+            <div class="pii-col hidden mt-2 min-w-0">
+              <div class="text-[10px] text-slate-400 mb-0.5">Data Pelanggan (Masked)</div>
+              <p class="text-[11px] text-slate-200 break-words">${escapeHtmlAttr(renderPiiMaskedCell(t))}</p>
+            </div>
+          </article>
         `;
       }).join('');
       applyPiiColumnVisibility();
