@@ -2988,9 +2988,7 @@
         if (full && Array.isArray(full.rows) && full.rows.length > 0) {
           await saveUploadedRowsToDb(full.rows);
           ingestAndFilterData(full.rows);
-          if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
-            window.applyDatePreset('ALL_UPLOADED', false);
-          }
+          window.applyAutoMonthRangeFromData(false);
           window.showToast(`Data terbaru dari cloud dimuat (${full.rows.length.toLocaleString('id-ID')} baris${full.savedBy ? ', oleh ' + full.savedBy : ''}).`, 'info');
         }
       } catch (err) {
@@ -3299,6 +3297,31 @@
       }
     };
 
+    // Rentang tanggal otomatis: dari tanggal 1 bulan dari tanggal terakhir (max_date) data terunggah s/d max_date.
+    // Dipanggil saat init, selesai upload, dan setiap kali dataset cloud berubah.
+    window.applyAutoMonthRangeFromData = function applyAutoMonthRangeFromData(skipRender = false) {
+      const pool = Array.isArray(allValid2MonthTickets) ? allValid2MonthTickets : [];
+      let maxD = null;
+      pool.forEach(t => {
+        if (t && t.TANGGAL instanceof Date && !isNaN(t.TANGGAL.getTime())) {
+          if (!maxD || t.TANGGAL > maxD) maxD = t.TANGGAL;
+        }
+      });
+
+      if (!maxD) {
+        // Belum ada data: fallback ke perilaku bawaan (tanggal 1 bulan ini s/d kemarin/hari ini)
+        window.applyDatePreset('MTD', skipRender);
+        return;
+      }
+
+      const monthStart = new Date(maxD.getFullYear(), maxD.getMonth(), 1, 0, 0, 0, 0);
+      setCustomDateRange(monthStart, maxD, 'MTD');
+
+      if (!skipRender) {
+        ingestAndFilterData(rawUploadedRows);
+      }
+    };
+
     window.handleDateRangeFilterChange = function handleDateRangeFilterChange() {
       const inpStart = document.getElementById('filter-date-start');
       const inpEnd = document.getElementById('filter-date-end');
@@ -3324,9 +3347,9 @@
       const elSl = document.getElementById('input-target-sl');
       const elCr = document.getElementById('input-target-cr');
       const elTtr = document.getElementById('input-target-ttr');
-      if (elSl) elSl.value = TARGET_SL.toFixed(1);
-      if (elCr) elCr.value = TARGET_CR.toFixed(1);
-      if (elTtr) elTtr.value = TARGET_TTR_HOURS.toFixed(1);
+      if (elSl) elSl.value = TARGET_SL.toFixed(2);
+      if (elCr) elCr.value = TARGET_CR.toFixed(2);
+      if (elTtr) elTtr.value = TARGET_TTR_HOURS.toFixed(2);
     }
 
     window.handleTargetConfigChange = function handleTargetConfigChange() {
@@ -3353,7 +3376,7 @@
       } else {
         renderFullDashboard();
       }
-      window.showToast(`Target diperbarui: SL ${TARGET_SL.toFixed(1)}%, CR ${TARGET_CR.toFixed(1)}%, TTR ≤ ${TARGET_TTR_HOURS.toFixed(1)}j`, 'success');
+      window.showToast(`Target diperbarui: SL ${TARGET_SL.toFixed(2)}%, CR ${TARGET_CR.toFixed(2)}%, TTR ≤ ${TARGET_TTR_HOURS.toFixed(2)}j`, 'success');
     };
 
     window.resetTargetConfigDefaults = function resetTargetConfigDefaults() {
@@ -3985,8 +4008,9 @@
 
       ingestAndFilterData(combinedRecords, { fileCount: files.length });
 
+      // Rentang tanggal default otomatis: 1 bulan dari max_date data terunggah s/d max_date
+      window.applyAutoMonthRangeFromData(false);
       if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
-        window.applyDatePreset('ALL_UPLOADED', false);
         window.showToast(`Rentang tanggal otomatis disesuaikan ke data terunggah (${filteredTickets.length.toLocaleString('id-ID')} tiket tampil).`, 'info');
       } else {
         window.showToast(`Berhasil memuat ${filteredTickets.length.toLocaleString('id-ID')} tiket dari ${files.length} file!`, 'success');
@@ -4258,18 +4282,18 @@
 
       const slMomStr = `${mom.slDiff >= 0 ? '▲ +' : '▼ '}${mom.slDiff.toFixed(2)}% MoM`;
       const crMomStr = `${mom.crDiff >= 0 ? '▲ +' : '▼ '}${mom.crDiff.toFixed(2)}% MoM`;
-      const ttrMomStr = `${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(1)}j MoM`;
+      const ttrMomStr = `${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(2)}j MoM`;
 
       return `
         <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5 flex flex-col justify-between">
           <div class="flex items-center justify-between gap-1 mb-1">
             <span class="text-[11px] font-bold text-slate-300">SL%</span>
             <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${slOk ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}">
-              Target ${TARGET_SL.toFixed(0)}% ${slOk ? '✓' : '!'}
+              Target ${TARGET_SL.toFixed(2)}% ${slOk ? '✓' : '!'}
             </span>
           </div>
           <div class="text-xl sm:text-2xl font-extrabold font-mono ${slOk ? 'text-emerald-400' : 'text-red-400'}">
-            ${metrics.slPct.toFixed(1)}%
+            ${metrics.slPct.toFixed(2)}%
           </div>
           <div class="text-[10px] font-mono ${mom.slDiff >= 0 ? 'text-emerald-300' : 'text-red-300'} mt-0.5">${slMomStr}</div>
           <div class="fx-formula-box mt-1 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-slate-400 truncate">
@@ -4281,11 +4305,11 @@
           <div class="flex items-center justify-between gap-1 mb-1">
             <span class="text-[11px] font-bold text-slate-300">CR%</span>
             <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${crOk ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
-              Target ${TARGET_CR.toFixed(0)}% ${crOk ? '✓' : '!'}
+              Target ${TARGET_CR.toFixed(2)}% ${crOk ? '✓' : '!'}
             </span>
           </div>
           <div class="text-xl sm:text-2xl font-extrabold font-mono ${crOk ? 'text-emerald-400' : 'text-orange-400'}">
-            ${metrics.crPct.toFixed(1)}%
+            ${metrics.crPct.toFixed(2)}%
           </div>
           <div class="text-[10px] font-mono ${mom.crDiff >= 0 ? 'text-emerald-300' : 'text-red-300'} mt-0.5">${crMomStr}</div>
           <div class="fx-formula-box mt-1 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-slate-400 truncate">
@@ -4297,15 +4321,15 @@
           <div class="flex items-center justify-between gap-1 mb-1">
             <span class="text-[11px] font-bold text-slate-300">TTR</span>
             <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${ttrOk ? 'bg-sky-500/20 text-sky-300' : 'bg-red-500/20 text-red-300'}">
-              ≤${TARGET_TTR_HOURS.toFixed(0)}j ${ttrOk ? '✓' : '!'}
+              ≤${TARGET_TTR_HOURS.toFixed(2)}j ${ttrOk ? '✓' : '!'}
             </span>
           </div>
           <div class="text-xl sm:text-2xl font-extrabold font-mono ${ttrOk ? 'text-sky-300' : 'text-red-400'}">
-            ${metrics.avgTtr.toFixed(1)}<span class="text-sm">j</span>
+            ${metrics.avgTtr.toFixed(2)}<span class="text-sm">j</span>
           </div>
           <div class="text-[10px] font-mono ${mom.ttrDiff <= 0 ? 'text-emerald-300' : 'text-red-300'} mt-0.5">${ttrMomStr}</div>
           <div class="fx-formula-box mt-1 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-slate-400 truncate">
-            Target ≤ ${TARGET_TTR_HOURS.toFixed(1)} Jam
+            Target ≤ ${TARGET_TTR_HOURS.toFixed(2)} Jam
           </div>
         </div>
       `;
@@ -4323,7 +4347,7 @@
       if (gap >= 0) {
         return `
           <div class="rounded-xl bg-emerald-950/50 border border-emerald-500/40 px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-1.5">
-            <div class="font-bold text-emerald-300">● Target SL ${TARGET_SL.toFixed(1)}% Tercapai (+${gap.toFixed(2)}%)</div>
+            <div class="font-bold text-emerald-300">● Target SL ${TARGET_SL.toFixed(2)}% Tercapai (+${gap.toFixed(2)}%)</div>
             <div class="text-[11px] font-mono text-emerald-200/90">
               Buffer: <strong>${metrics.bufferIslTickets}</strong> tiket • Open ISL:
               <button data-site-key="${siteKey}" onclick="openOpenIslModalFromEl(this)" class="underline font-bold cursor-pointer">${metrics.openInSla}</button>
@@ -4407,7 +4431,7 @@
           ? `<span class="text-slate-400 font-mono">-</span>`
           : (slOk
             ? `<div class="inline-block px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono font-bold">Tercapai (+${m.bufferIslTickets})</div>
-               <div class="fx-formula-box text-[10px] font-mono text-slate-400 mt-0.5">SL ≥ ${TARGET_SL.toFixed(1)}%</div>`
+               <div class="fx-formula-box text-[10px] font-mono text-slate-400 mt-0.5">SL ≥ ${TARGET_SL.toFixed(2)}%</div>`
             : `<div class="inline-block px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-300 font-mono font-bold">Butuh +${m.neededIslTickets} ISL</div>
                <div class="fx-formula-box text-[10px] font-mono text-slate-400 mt-0.5">Open ISL: ${m.openInSla}</div>`);
 
@@ -4431,19 +4455,19 @@
               <button data-unit="${escapeHtmlAttr(u.unit)}" data-filter="CLOSED_ISL" onclick="openUnitModalFromEl(this)" class="px-2 py-0.5 rounded bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 cursor-pointer">${m.closedInSla}</button>
             </td>
             <td class="py-2.5 px-3 text-right font-mono">
-              <div class="font-extrabold ${slOk ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(1)}% <span class="text-[10px] text-slate-400">/ ${TARGET_SL.toFixed(0)}%</span></div>
+              <div class="font-extrabold ${slOk ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(2)}% <span class="text-[10px] text-slate-400">/ ${TARGET_SL.toFixed(2)}%</span></div>
               <div class="text-[10px] ${mom.slDiff >= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.slDiff >= 0 ? '▲ +' : '▼ '}${mom.slDiff.toFixed(2)}% MoM</div>
               <div class="fx-formula-box text-[10px] text-slate-400">=${m.closedInSla}/${m.closed}</div>
             </td>
             <td class="py-2.5 px-3 text-right">${needBadge}</td>
             <td class="py-2.5 px-3 text-right font-mono">
-              <div class="font-extrabold ${crOk ? 'text-emerald-400' : 'text-orange-400'}">${m.crPct.toFixed(1)}% <span class="text-[10px] text-slate-400">/ ${TARGET_CR.toFixed(0)}%</span></div>
+              <div class="font-extrabold ${crOk ? 'text-emerald-400' : 'text-orange-400'}">${m.crPct.toFixed(2)}% <span class="text-[10px] text-slate-400">/ ${TARGET_CR.toFixed(2)}%</span></div>
               <div class="text-[10px] ${mom.crDiff >= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.crDiff >= 0 ? '▲ +' : '▼ '}${mom.crDiff.toFixed(2)}% MoM</div>
               <div class="fx-formula-box text-[10px] text-slate-400">${crOk ? 'Target CR ✓' : `Butuh +${m.neededClosedForCr} Closed`}</div>
             </td>
             <td class="py-2.5 px-3 text-right font-mono">
-              <div class="font-extrabold ${ttrOk ? 'text-sky-300' : 'text-red-400'}">${m.avgTtr.toFixed(2)}j <span class="text-[10px] text-slate-400">/ ≤${TARGET_TTR_HOURS.toFixed(0)}j</span></div>
-              <div class="text-[10px] ${mom.ttrDiff <= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(1)}j MoM</div>
+              <div class="font-extrabold ${ttrOk ? 'text-sky-300' : 'text-red-400'}">${m.avgTtr.toFixed(2)}j <span class="text-[10px] text-slate-400">/ ≤${TARGET_TTR_HOURS.toFixed(2)}j</span></div>
+              <div class="text-[10px] ${mom.ttrDiff <= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(2)}j MoM</div>
             </td>
           </tr>
         `;
@@ -4461,14 +4485,14 @@
           <td class="py-2.5 px-3 text-right font-mono text-amber-300">${tot.open}</td>
           <td class="py-2.5 px-3 text-right font-mono text-sky-300">${tot.closedInSla}</td>
           <td class="py-2.5 px-3 text-right font-mono ${tot.slPct >= TARGET_SL ? 'text-emerald-400' : 'text-red-400'}">
-            ${tot.slPct.toFixed(1)}% <span class="block text-[10px] font-normal">${totMom.slDiff >= 0 ? '▲ +' : '▼ '}${totMom.slDiff.toFixed(2)}% MoM</span>
+            ${tot.slPct.toFixed(2)}% <span class="block text-[10px] font-normal">${totMom.slDiff >= 0 ? '▲ +' : '▼ '}${totMom.slDiff.toFixed(2)}% MoM</span>
           </td>
           <td class="py-2.5 px-3 text-right font-mono">${tot.slPct >= TARGET_SL ? `Buffer +${tot.bufferIslTickets}` : `Butuh +${tot.neededIslTickets} ISL`}</td>
           <td class="py-2.5 px-3 text-right font-mono ${tot.crPct >= TARGET_CR ? 'text-emerald-400' : 'text-orange-400'}">
-            ${tot.crPct.toFixed(1)}% <span class="block text-[10px] font-normal">${totMom.crDiff >= 0 ? '▲ +' : '▼ '}${totMom.crDiff.toFixed(2)}% MoM</span>
+            ${tot.crPct.toFixed(2)}% <span class="block text-[10px] font-normal">${totMom.crDiff >= 0 ? '▲ +' : '▼ '}${totMom.crDiff.toFixed(2)}% MoM</span>
           </td>
           <td class="py-2.5 px-3 text-right font-mono text-sky-300">
-            ${tot.avgTtr.toFixed(2)}j <span class="block text-[10px] font-normal">${totMom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${totMom.ttrDiff.toFixed(1)}j MoM</span>
+            ${tot.avgTtr.toFixed(2)}j <span class="block text-[10px] font-normal">${totMom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${totMom.ttrDiff.toFixed(2)}j MoM</span>
           </td>
         </tr>
       `;
@@ -4515,11 +4539,11 @@
                 ? `<button data-pool="${escapeHtmlAttr(poolName)}" data-filter="NEAR_OSLA" onclick="openPoolModalFromEl(this)" class="px-2 py-0.5 rounded-full bg-red-600 text-white font-bold cursor-pointer">${m.nearOslaOpen} Alert</button>`
                 : `<span class="text-slate-500">0</span>`}
             </td>
-            <td class="py-2 px-3 text-right font-mono font-bold ${slOk ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(1)}%</td>
+            <td class="py-2 px-3 text-right font-mono font-bold ${slOk ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(2)}%</td>
             <td class="py-2 px-3 text-right font-mono text-[11px] ${slOk ? 'text-emerald-300' : 'text-red-300'}">
               ${m.closed === 0 ? '-' : (slOk ? `Buffer +${m.bufferIslTickets}` : `Butuh +${m.neededIslTickets}`)}
             </td>
-            <td class="py-2 px-3 text-right font-mono text-sky-300">${m.avgTtr.toFixed(1)}j</td>
+            <td class="py-2 px-3 text-right font-mono text-sky-300">${m.avgTtr.toFixed(2)}j</td>
           </tr>
         `;
       });
@@ -4547,8 +4571,8 @@
       const avgTtrEl = document.getElementById('priority-avg-ttr');
       const targetTtrEl = document.getElementById('priority-target-ttr-label');
       const totalOpenEl = document.getElementById('priority-total-open');
-      if (avgTtrEl) avgTtrEl.textContent = `${metrics.avgTtr.toFixed(1)}j`;
-      if (targetTtrEl) targetTtrEl.textContent = `(≤${TARGET_TTR_HOURS.toFixed(0)}j)`;
+      if (avgTtrEl) avgTtrEl.textContent = `${metrics.avgTtr.toFixed(2)}j`;
+      if (targetTtrEl) targetTtrEl.textContent = `(≤${TARGET_TTR_HOURS.toFixed(2)}j)`;
       if (totalOpenEl) totalOpenEl.textContent = openTickets.length.toLocaleString('id-ID');
 
       const container = document.getElementById('priority-list-container');
@@ -4618,15 +4642,15 @@
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400">SL% Match</div>
-            <div class="text-base font-extrabold font-mono ${m.slPct >= TARGET_SL ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(1)}%</div>
+            <div class="text-base font-extrabold font-mono ${m.slPct >= TARGET_SL ? 'text-emerald-400' : 'text-red-400'}">${m.slPct.toFixed(2)}%</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400">CR% Match</div>
-            <div class="text-base font-extrabold font-mono ${m.crPct >= TARGET_CR ? 'text-emerald-400' : 'text-orange-400'}">${m.crPct.toFixed(1)}%</div>
+            <div class="text-base font-extrabold font-mono ${m.crPct >= TARGET_CR ? 'text-emerald-400' : 'text-orange-400'}">${m.crPct.toFixed(2)}%</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400">Avg TTR</div>
-            <div class="text-base font-extrabold font-mono text-sky-300">${m.avgTtr.toFixed(1)}j</div>
+            <div class="text-base font-extrabold font-mono text-sky-300">${m.avgTtr.toFixed(2)}j</div>
           </div>
         `;
       }
@@ -4649,7 +4673,7 @@
             <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
             <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
           </td>
-          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${getRemainingHours(t).toFixed(1)}j`}</td>
+          <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : `Sisa ${getRemainingHours(t).toFixed(2)}j`}</td>
           <td class="py-2 px-2.5 text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
           <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
         </tr>
@@ -4730,8 +4754,8 @@
               </td>
               <td class="py-1.5 px-1.5"><div class="flex flex-wrap gap-1">${prioBadges}</div></td>
               <td class="py-1.5 px-1.5 text-right font-mono">
-                <div class="text-sky-300 font-bold">${item.m.avgTtr.toFixed(1)}j</div>
-                <div class="text-[9px] ${mom.ttrDiff <= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(1)}j</div>
+                <div class="text-sky-300 font-bold">${item.m.avgTtr.toFixed(2)}j</div>
+                <div class="text-[9px] ${mom.ttrDiff <= 0 ? 'text-emerald-300' : 'text-red-300'}">${mom.ttrDiff <= 0 ? '▼ ' : '▲ +'}${mom.ttrDiff.toFixed(2)}j</div>
               </td>
             </tr>
           `;
@@ -4794,15 +4818,15 @@
         strip.innerHTML = `
           <div class="rounded-xl bg-slate-950/75 border border-orange-500/35 p-2.5">
             <div class="text-[10px] text-orange-300 font-semibold">Rata-rata Site 2 Semarang (${currentChartDays}H)</div>
-            <div class="text-base font-extrabold font-mono text-white">${avgS2.toFixed(1)}${unitSuffix}</div>
+            <div class="text-base font-extrabold font-mono text-white">${avgS2.toFixed(2)}${unitSuffix}</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-blue-500/35 p-2.5">
             <div class="text-[10px] text-blue-300 font-semibold">Rata-rata Site 1 Bandung (${currentChartDays}H)</div>
-            <div class="text-base font-extrabold font-mono text-white">${avgS1.toFixed(1)}${unitSuffix}</div>
+            <div class="text-base font-extrabold font-mono text-white">${avgS1.toFixed(2)}${unitSuffix}</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400 font-semibold">Selisih Site 2 vs Site 1</div>
-            <div class="text-base font-extrabold font-mono text-amber-300">${(avgS2 - avgS1 >= 0 ? '+' : '') + (avgS2 - avgS1).toFixed(1)}${unitSuffix}</div>
+            <div class="text-base font-extrabold font-mono text-amber-300">${(avgS2 - avgS1 >= 0 ? '+' : '') + (avgS2 - avgS1).toFixed(2)}${unitSuffix}</div>
           </div>
           <div class="rounded-xl bg-slate-950/75 border border-slate-800 p-2.5">
             <div class="text-[10px] text-slate-400 font-semibold">Acuan Garis Target</div>
@@ -5128,8 +5152,8 @@
         const prioritas = t.PRIORITY_LEVEL > 0 ? `P${t.PRIORITY_LEVEL}` : 'Closed';
         const statusSla = `${t.CASE_STATUS} / ${t.SLA_STATUS}`;
         const sisaSlTtr = t.IS_CLOSED
-          ? `${Number(t.TTR_HOURS || 0).toFixed(1)} j (TTR)`
-          : `Sisa ${getRemainingHours(t).toFixed(1)} j`;
+          ? `${Number(t.TTR_HOURS || 0).toFixed(2)} j (TTR)`
+          : `Sisa ${getRemainingHours(t).toFixed(2)} j`;
         return {
           'CASE_ID': t.CASE_ID,
           'UNIT_NAME': t.UNIT_NAME,
@@ -5212,7 +5236,7 @@
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
               <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${t.SLA_STATUS}</span>
             </td>
-            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(1)}j` : `Sisa ${getRemainingHours(t).toFixed(1)}j`}</td>
+            <td class="py-2 px-2.5 text-right font-mono text-slate-200">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : `Sisa ${getRemainingHours(t).toFixed(2)}j`}</td>
             <td class="py-2 px-2.5 text-slate-200 max-w-[200px] truncate" title="${escapeHtmlAttr(t.CASE_TYPE_3)}">${escapeHtmlAttr(t.CASE_TYPE_3)}</td>
             <td class="py-2 px-2.5 text-slate-300 max-w-[260px] truncate" title="${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}">${escapeHtmlAttr(maskPlainText(t.CASE_NOTES))}</td>
             <td class="py-2 px-2.5 pii-col hidden text-slate-200 max-w-[220px] truncate" title="${escapeHtmlAttr(renderPiiMaskedCell(t))}">${escapeHtmlAttr(renderPiiMaskedCell(t))}</td>
@@ -5736,7 +5760,7 @@
       }
 
       loadSavedTargetConfig();
-      window.applyDatePreset('MTD', true);
+      window.applyAutoMonthRangeFromData(true);
 
       const dz = document.getElementById('dropzone-area');
       if (dz) {
@@ -5764,9 +5788,7 @@
       const persistedRows = authenticated ? await loadActiveDataset() : null;
       if (persistedRows && persistedRows.length > 0) {
         ingestAndFilterData(persistedRows);
-        if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
-          window.applyDatePreset('ALL_UPLOADED', false);
-        }
+        window.applyAutoMonthRangeFromData(false);
       } else {
         ingestAndFilterData([]);
       }
@@ -5784,9 +5806,7 @@
       try {
         const rows = await loadActiveDataset();
         ingestAndFilterData(rows || []);
-        if (filteredTickets.length === 0 && allValid2MonthTickets.length > 0) {
-          window.applyDatePreset('ALL_UPLOADED', false);
-        }
+        window.applyAutoMonthRangeFromData(false);
       } catch (error) {
         console.warn('Gagal memuat dataset setelah login:', error);
         ingestAndFilterData([]);
