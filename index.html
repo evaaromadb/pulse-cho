@@ -270,14 +270,20 @@
     html:not(.dark) #user-mgmt-modal .text-red-400 {
       color: #b91c1c !important;
     }
+    html:not(.dark) #drilldown-modal .text-violet-300,
+    html:not(.dark) #drilldown-modal .text-violet-400,
+    html:not(.dark) #user-mgmt-modal .text-violet-300,
+    html:not(.dark) #user-mgmt-modal .text-violet-400 {
+      color: #6d28d9 !important;
+    }
     /* Jaga teks putih pada badge/tombol berwarna di dalam modal Mode Terang */
     html:not(.dark) #drilldown-modal :is(.bg-red-600, .bg-orange-500, .bg-sky-600, .bg-blue-600, .bg-emerald-600).text-white,
     html:not(.dark) #user-mgmt-modal :is(.bg-red-600, .bg-orange-500, .bg-sky-600, .bg-blue-600, .bg-emerald-600).text-white {
       color: #ffffff !important;
     }
     /* Badge transparan aksen: latar dipaskan lembut agar teks gelap tetap terbaca */
-    html:not(.dark) #drilldown-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20),
-    html:not(.dark) #user-mgmt-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20) {
+    html:not(.dark) #drilldown-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20, .bg-violet-500\/20, .bg-slate-400\/20, .bg-slate-500\/20),
+    html:not(.dark) #user-mgmt-modal :is(.bg-emerald-500\/20, .bg-amber-500\/20, .bg-sky-500\/20, .bg-red-500\/20, .bg-violet-500\/20, .bg-slate-400\/20, .bg-slate-500\/20) {
       background-color: #f1f5f9 !important;
     }
 
@@ -5362,6 +5368,20 @@
       renderModalTableRows(sub);
     };
 
+    // Metadata badge Tier Pelanggan (CUSTOMER_HVC_TIER) untuk kartu detail case.
+    // Warna dibedakan per tier; kelas -300 & latar transparan diselaraskan Mode Terang lewat override CSS #drilldown-modal.
+    function getTierBadgeMeta(tierRaw) {
+      const raw = String(tierRaw == null ? '' : tierRaw).trim();
+      if (!raw || raw === '-') {
+        return { label: '-', className: 'bg-slate-500/20 text-slate-400 border border-slate-500/40' };
+      }
+      const low = raw.toLowerCase();
+      if (low.includes('platinum')) return { label: 'Platinum', className: 'bg-violet-500/20 text-violet-300 border border-violet-500/40' };
+      if (low.includes('gold')) return { label: 'Gold', className: 'bg-amber-500/20 text-amber-300 border border-amber-500/40' };
+      if (low.includes('silver')) return { label: 'Silver', className: 'bg-slate-400/20 text-slate-300 border border-slate-400/40' };
+      return { label: raw, className: 'bg-sky-500/20 text-sky-300 border border-sky-500/40' };
+    }
+
     function renderModalTableRows(list) {
       const tbody = document.getElementById('modal-tickets-tbody');
       if (!tbody) return;
@@ -5383,12 +5403,15 @@
           : '<span class="text-slate-500">Closed</span>';
         const poolDisplay = t.POOL_LOOKUP ? `${t.POOL_CODE} (${t.POOL_LOOKUP.detail})` : (t.POOL_CODE || t.POOL);
         const closeDtDisplay = t.CLOSE_DT ? formatCaseDateTime(t.CLOSE_DT, 'wall') : '-';
+        const tierMeta = getTierBadgeMeta(t.CUSTOMER_HVC_TIER);
+        const tierBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${tierMeta.className}" title="Tier Pelanggan (CUSTOMER_HVC_TIER)">${escapeHtmlAttr(tierMeta.label)}</span>`;
         return `
           <article class="rounded-xl border border-slate-800 bg-slate-950/60 p-3 min-w-0">
             <div class="flex flex-wrap items-center gap-1.5 mb-2">
               <span class="font-mono font-bold text-orange-300 break-all">${escapeHtmlAttr(t.CASE_ID)}</span>
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_CLOSED ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">${escapeHtmlAttr(t.CASE_STATUS)}</span>
               <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${t.IS_OUT_SLA ? 'bg-red-500/20 text-red-300' : 'bg-sky-500/20 text-sky-300'}">${escapeHtmlAttr(t.SLA_STATUS)}</span>
+              ${tierBadge}
               ${prioBadge}
               <span class="ml-auto font-mono text-[11px] text-slate-300">${t.IS_CLOSED ? `${t.TTR_HOURS.toFixed(2)}j` : formatRemainingTtr(t)}</span>
             </div>
