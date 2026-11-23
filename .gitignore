@@ -1,2 +1,10 @@
 /api/tidb-config.php
 /render-admin-credentials.local.env
+
+# File lokal berisi rahasia (env kredensial, dsb.)
+*.local.env
+*.env.local
+
+# Artefak QA (screenshot hasil login/uji) tidak boleh ter-commit.
+/qa-*.png
+/qa-*.mjs
