@@ -2590,7 +2590,117 @@
     }
 
     /**
-     * Ganti dataset di cloud (upsert satu baris). Data lama otomatis tertimpa.
+     * Kolom sumber yang benar-benar dipakai aplikasi (KPI/SL/CR/TTR, filter
+     * tanggal, tabel drill-down, masking PII, dan export report). Kolom di luar
+     * daftar ini dibuang di browser SEBELUM dikirim ke TiDB, sehingga payload
+     * unggahan & ukuran dataset di server jauh lebih kecil tanpa mengubah
+     * perhitungan apa pun.
+     */
+    const PULSE_REQUIRED_COLUMNS = new Set([
+      // Unit / site
+      'UNIT_NAME', 'UNIT', 'SITE_UNIT', 'UNITNAME', 'NAMA_UNIT', 'WORKGROUP',
+      // Tanggal dibuat / SLA start
+      'TANGGAL', 'CASE_SLA_START_DATETIME', 'CREATED_DATE', 'CASE_CREATED_DATE',
+      'CREATE_DT', 'CREATED_DT', 'TGL_CREATE', 'SLA_START_DATETIME',
+      // Due / close / creation
+      'CASE_DUE_DATETIME', 'DUE_DATE', 'SLA_DUE_DATETIME',
+      'CLOSE_DT', 'CLOSED_DT', 'CLOSED_DATETIME', 'CLOSE_DATE', 'CLOSED_DATE',
+      'CASE_CREATION_DATETIME', 'CASE_CREATED_DATETIME', 'CREATION_DATETIME',
+      'CREATED_DATETIME', 'CASE_CREATE_DT', 'CREATE_DATETIME',
+      // Status / SLA / substatus / notes
+      'CASE_STATUS', 'STATUS', 'TICKET_STATUS',
+      'SLA_STATUS', 'SLA', 'STATUS_SLA',
+      'CASE_SUBSTATUS', 'SUBSTATUS',
+      'CASE_NOTES', 'NOTES', 'REMARKS', 'DESCRIPTION',
+      // Tier / TTR / pool / remedy
+      'CUSTOMER_HVC_TIER', 'TIER', 'HVC', 'HVC_TIER',
+      'TTR_HOURS', 'TTR',
+      'POOL', 'ESCALATION_POOL', 'ASSIGNMENT_GROUP',
+      'CASE_REMEDY_IT', 'REMEDY_IT', 'ID_REMEDY_IT',
+      'CASE_REMEDY_NETWORK', 'REMEDY_NETWORK', 'ID_REMEDY_NETWORK',
+      // Identitas kasus / kategori
+      'CASE_ID', 'CASEID', 'TICKET_ID', 'ID',
+      'CASE_TYPE_3', 'KIP', 'CATEGORY_3', 'TYPE_3',
+      // PII (untuk masking di UI & export oleh Admin)
+      'MSISDN', 'NO_MSISDN', 'NOMOR_PELANGGAN', 'NO_PELANGGAN', 'CUSTOMER_MSISDN',
+      'NO_HP', 'NO_HANDPHONE', 'HANDPHONE', 'PHONE', 'NO_TELP', 'NO_TELEPON', 'CONTACT_NUMBER',
+      'NIK', 'NO_KTP', 'KTP', 'NO_IDENTITAS', 'NOMOR_IDENTITAS', 'IDENTITAS',
+      'EMAIL', 'CUSTOMER_EMAIL', 'E_MAIL', 'ALAMAT_EMAIL', 'EMAIL_PELANGGAN',
+      'CUSTOMER_NAME', 'NAMA_PELANGGAN', 'NAMA_CUSTOMER', 'NAMA_PEMILIK', 'CONTACT_NAME', 'NAMA_KONTAK'
+    ]);
+
+    /**
+     * Pre-filter kolom di browser: pertahankan hanya kolom yang dipakai
+     * aplikasi. Baris tanpa kolom dikenali tetap disertakan (objek kosong) agar
+     * penanganan "baris non-unit" pada ingest tidak berubah.
+     */
+    function filterPulseRecordColumns(rows) {
+      if (!Array.isArray(rows) || rows.length === 0) return [];
+      return rows.map(row => {
+        const kept = {};
+        for (const key in row) {
+          if (Object.prototype.hasOwnProperty.call(row, key) && PULSE_REQUIRED_COLUMNS.has(key)) {
+            kept[key] = row[key];
+          }
+        }
+        return kept;
+      });
+    }
+
+    // Jumlah baris per request saat unggah bertahap. Request kecil membuat RAM
+    // Render tetap rendah dan aman terhadap timeout proxy.
+    const PULSE_UPLOAD_BATCH_ROWS = 2000;
+
+    /**
+     * Unggah dataset bertahap ke TiDB: init -> beberapa batch chunk -> finalize.
+     * Tiap request hanya membawa sebagian baris, sehingga RAM Render kecil.
+     * Dataset lama tetap aktif sampai finalize berhasil, jadi kegagalan di
+     * tengah unggahan tidak merusak data yang sedang dipakai.
+     * Return respons finalize: { row_count, saved_at, saved_by, version }.
+     */
+    async function uploadPulseDatasetInChunks(rows, savedBy = '') {
+      const allRows = Array.isArray(rows) ? rows : [];
+      const init = await pulseCloudRequest('?upload=init', { method: 'PUT', body: '{}' });
+      const version = init && init.version ? String(init.version) : '';
+      if (!/^[a-f0-9]{32}$/.test(version)) {
+        throw new Error('Server tidak mengembalikan version upload yang valid.');
+      }
+
+      const badge = document.getElementById('upload-status-badge');
+      const totalRows = allRows.length;
+      try {
+        let sent = 0;
+        for (let i = 0; i < totalRows; i += PULSE_UPLOAD_BATCH_ROWS) {
+          const batch = allRows.slice(i, i + PULSE_UPLOAD_BATCH_ROWS);
+          await pulseCloudRequest(`?upload=chunk&version=${encodeURIComponent(version)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ rows: batch })
+          });
+          sent += batch.length;
+          if (badge) {
+            badge.textContent = `Mengunggah ke TiDB... ${sent.toLocaleString('id-ID')} / ${totalRows.toLocaleString('id-ID')} baris`;
+          }
+        }
+        const result = await pulseCloudRequest(`?upload=finalize&version=${encodeURIComponent(version)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ saved_by: savedBy || '-' })
+        });
+        pulseCloudLastVersion = `${result.saved_at || ''}|${result.row_count || 0}`;
+        pulseCloudLastSavedBy = result.saved_by || savedBy || '-';
+        pulseCloudLastSavedAt = result.saved_at || null;
+        return result;
+      } catch (err) {
+        // Hapus versi setengah jadi agar tidak menumpuk di TiDB.
+        try {
+          await pulseCloudRequest(`?upload=abort&version=${encodeURIComponent(version)}`, { method: 'PUT', body: '{}' });
+        } catch (cleanupErr) {}
+        throw err;
+      }
+    }
+
+    /**
+     * Ganti dataset di cloud lewat satu request (mode lama / fallback bila
+     * backend belum mendukung unggahan bertahap). Data lama otomatis tertimpa.
      */
     async function writePulseDatasetToCloud(rows, savedBy = '') {
       const data = await pulseCloudRequest('', {
@@ -2721,14 +2831,23 @@
     }
 
     /**
-     * REPLACE: upsert dataset aktif ke cloud + perbarui cache lokal.
+     * REPLACE: unggah dataset ke cloud secara bertahap (hemat RAM Render) lalu
+     * perbarui cache lokal. Tidak ada request unduh ulang setelah unggah.
      */
     async function replaceActiveDataset(rows, savedBy = '') {
       if (!isPulseCloudEnabled()) return { ok: false, reason: 'not_configured' };
       pulseCloudSaveInFlight = true;
       updateCloudSyncBadge();
       try {
-        await writePulseDatasetToCloud(rows, savedBy);
+        try {
+          await uploadPulseDatasetInChunks(rows, savedBy);
+        } catch (chunkErr) {
+          // Backend lama belum mendukung unggahan bertahap -> mode satu request.
+          console.warn('Unggahan bertahap gagal, mencoba mode lama:', chunkErr);
+          await writePulseDatasetToCloud(rows, savedBy);
+        }
+        // Simpan hasil unggahan ke IndexedDB pengunggah beserta versi terbaru,
+        // sehingga dashboard terisi tanpa menarik ulang dataset dari Render.
         await saveUploadedRowsToDb(rows, pulseCloudLastVersion);
         return { ok: true };
       } catch (err) {
@@ -3962,21 +4081,29 @@
         return;
       }
 
+      // Pre-filter kolom di browser: buang kolom yang tidak dipakai aplikasi
+      // sebelum dikirim/disimpan, sehingga body unggahan & dataset di Render
+      // jauh lebih kecil (KPI/TTR/filter/export tetap sama karena kolom yang
+      // dibutuhkan selalu dipertahankan).
+      const records = filterPulseRecordColumns(combinedRecords);
+
       const session = window.getCurrentSession();
       const savedBy = session ? `${session.namaLengkap || session.username} (${session.username})` : '-';
 
       if (isPulseCloudEnabled()) {
-        const result = await replaceActiveDataset(combinedRecords, savedBy);
+        const result = await replaceActiveDataset(records, savedBy);
         if (!result.ok) {
           window.showToast(`Gagal menyimpan ke cloud: ${result.reason}. Data TIDAK diubah.`, 'error');
           return;
         }
       } else {
         // Cloud belum dikonfigurasi: simpan hanya di browser ini (mode replace)
-        await saveUploadedRowsToDb(combinedRecords);
+        await saveUploadedRowsToDb(records);
       }
 
-      ingestAndFilterData(combinedRecords, { fileCount: files.length });
+      // Dashboard langsung diperbarui dari data lokal yang baru diunggah,
+      // tanpa menarik ulang seluruh dataset dari server Render.
+      ingestAndFilterData(records, { fileCount: files.length });
 
       // Rentang tanggal default otomatis: 1 bulan dari max_date data terunggah s/d max_date
       window.applyAutoMonthRangeFromData(false);
