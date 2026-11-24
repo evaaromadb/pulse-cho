@@ -6014,10 +6014,14 @@
   </script>
   <script>
     // =========================================================================
-    // LIVE CHAT RINGAN (polling 8 detik, hanya saat login & tab aktif)
+    // LIVE CHAT RINGAN
+    // Polling pesan: 8 detik (dalam rentang 5-8 detik) dan hanya berjalan
+    // saat login + tab aktif + jendela chat terbuka. Dijeda total saat tab
+    // disembunyikan (document.hidden) atau jendela chat ditutup.
+    // Hanya pesan baru yang diambil (param after_id) agar hemat bandwidth.
     // =========================================================================
     const PULSE_CHAT_POLL_MS = 8000;
-    const PULSE_CHAT_HEARTBEAT_MS = 45000; // heartbeat presence (tetap jalan walau jendela chat tertutup)
+    const PULSE_CHAT_HEARTBEAT_MS = 60000; // heartbeat presence (tetap jalan walau jendela chat tertutup)
     const PULSE_CHAT_MUTE_KEY = 'pulse_cho_chat_muted_v1';
     const PULSE_CHAT_MAX_LEN = 500;
     const PULSE_CHAT_EDIT_WINDOW_SEC = 120; // batas edit/hapus pesan sendiri (2 menit)
@@ -7146,10 +7150,17 @@
     }
 
     // ---------- Polling ----------
+    // Hanya berjalan saat jendela chat terbuka DAN tab browser aktif (5-8 detik).
+    // Saat tab disembunyikan atau jendela chat ditutup, polling dihentikan total
+    // agar tidak membuang kuota bandwidth (heartbeat presence tetap berjalan).
     function startChatPolling() {
       stopChatPolling();
+      if (!pulseChatState.active || !pulseChatState.open || document.hidden) return;
       pulseChatState.pollTimer = setInterval(() => {
-        if (document.hidden) return;
+        if (!pulseChatState.active || !pulseChatState.open || document.hidden) {
+          stopChatPolling();
+          return;
+        }
         fetchChatMessages();
       }, PULSE_CHAT_POLL_MS);
     }
@@ -7214,12 +7225,14 @@
         renderChatLayout();
         scrollChatToBottom();
         fetchChatMessages();
+        startChatPolling();
         const input = document.getElementById('pulse-chat-input');
         if (input) setTimeout(() => input.focus(), 60);
       } else {
         panel.classList.add('hidden');
         panel.classList.remove('flex');
         pulseChatState.open = false;
+        stopChatPolling();
         hideMentionSuggest();
       }
       updateChatBadges();
@@ -7354,9 +7367,17 @@
       document.addEventListener('pointerdown', pulseChatUnlockAudio);
       document.addEventListener('keydown', pulseChatUnlockAudio);
       document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && pulseChatState.active) {
+        if (document.hidden) {
+          // Tab tidak aktif: hentikan polling pesan (hemat bandwidth).
+          stopChatPolling();
+          return;
+        }
+        if (pulseChatState.active) {
           sendChatHeartbeat();
-          fetchChatMessages();
+          if (pulseChatState.open) {
+            fetchChatMessages();
+            startChatPolling();
+          }
         }
       });
       const input = document.getElementById('pulse-chat-input');

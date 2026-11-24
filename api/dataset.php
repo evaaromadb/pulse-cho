@@ -27,7 +27,6 @@ function pulseStreamStart(): void
     }
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-    header('Content-Encoding: identity');
     header('X-Accel-Buffering: no');
 }
 
@@ -157,10 +156,11 @@ try {
             }
             // Versi ini dipakai ulang; browser boleh menyimpannya sebentar supaya
             // reload berikutnya tidak perlu mengunduh ulang data yang sama.
+            // Chunk adalah payload terbesar aplikasi, jadi dikirim ter-Gzip.
             pulseStreamStart();
             header('Cache-Control: private, max-age=600');
             header('ETag: "' . $versionParam . '-' . $chunkIndex . '"');
-            echo trim((string) $raw);
+            pulseEchoCompressed(trim((string) $raw));
             exit;
         }
 

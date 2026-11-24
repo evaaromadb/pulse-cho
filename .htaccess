@@ -1,0 +1,28 @@
+# PULSE CHO — kebijakan cache & Vary untuk ASET STATIS (aman terhadap update aplikasi).
+#
+# Catatan: halaman HTML (index.html) TIDAK dipaksa no-cache. Server statis
+# Render sudah mengirim file HTML ter-Gzip + ETag, sehingga memaksa revalidasi
+# justru membuat browser mengunduh ulang setiap kali muat.
+# Hanya aset statis yang jarang berubah (CSS/JS/gambar/font) yang di-cache lama.
+# Respons API (application/json, ditangani PHP) tidak tersentuh aturan ini.
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 7 days"
+  ExpiresByType text/javascript "access plus 7 days"
+  ExpiresByType application/javascript "access plus 7 days"
+  ExpiresByType image/svg+xml "access plus 7 days"
+  ExpiresByType image/png "access plus 7 days"
+  ExpiresByType image/jpeg "access plus 7 days"
+  ExpiresByType image/gif "access plus 7 days"
+  ExpiresByType image/x-icon "access plus 7 days"
+  ExpiresByType font/woff2 "access plus 30 days"
+  ExpiresByType font/woff "access plus 30 days"
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js|mjs|png|jpe?g|gif|svg|ico|woff2?)$">
+    Header set Cache-Control "public, max-age=604800"
+    Header set Vary "Accept-Encoding"
+  </FilesMatch>
+</IfModule>

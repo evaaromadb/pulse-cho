@@ -34,6 +34,52 @@ function pulseRespond(array $payload, int $status = 200): void
     exit;
 }
 
+/**
+ * Aktifkan kompresi Gzip untuk seluruh respons JSON API (hemat bandwidth).
+ * Hanya dijalankan bila klien mendukung gzip, ekstensi zlib tersedia, dan
+ * kompresi PHP bawaan tidak aktif (agar tidak terjadi kompresi ganda).
+ * Dipanggil setelah CORS selesai supaya respons preflight tidak ikut di-buffer.
+ */
+function pulseEnableGzip(): void
+{
+    if (PHP_SAPI === 'cli') {
+        return;
+    }
+    if (!function_exists('ob_gzhandler')) {
+        return;
+    }
+    if ((int) ini_get('zlib.output_compression') === 1) {
+        return;
+    }
+    $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''));
+    if (strpos($accept, 'gzip') === false) {
+        return;
+    }
+    ob_start('ob_gzhandler');
+}
+
+/**
+ * Kirim payload teks besar (mis. satu chunk dataset) langsung ke output dengan
+ * Gzip bila klien mendukungnya. Dipakai untuk respons yang sudah dikirim tanpa
+ * buffer (lihat pulseStreamStart di dataset.php).
+ */
+function pulseEchoCompressed(string $payload): void
+{
+    header('Vary: Accept-Encoding');
+    $accept = strtolower((string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''));
+    if (function_exists('gzencode') && strpos($accept, 'gzip') !== false) {
+        $encoded = gzencode($payload, 6);
+        if ($encoded !== false) {
+            header('Content-Encoding: gzip');
+            header('Content-Length: ' . strlen($encoded));
+            echo $encoded;
+            return;
+        }
+    }
+    header('Content-Length: ' . strlen($payload));
+    echo $payload;
+}
+
 function pulseAllowedOrigins(): array
 {
     $raw = trim((string) (getenv('PULSE_ALLOWED_ORIGIN') ?: ''));
@@ -440,3 +486,6 @@ function pulseSetSessionCookie(string $token, int $maxAge): void
 }
 
 pulseConfigureCors();
+
+// Semua endpoint yang memakai pulseRespond() otomatis terkompresi Gzip.
+pulseEnableGzip();

@@ -674,7 +674,6 @@ try {
         pulseChatTouchPresence($pdo, $user);
         pulseChatCleanup($pdo);
 
-        $groups = pulseChatUserGroups($pdo, $user);
         $isAdmin = strcasecmp((string) $user['role'], 'Admin') === 0;
 
         // Mode meta saja: heartbeat ringan (dipakai saat daftar user/grup sedang tampil).
@@ -711,9 +710,11 @@ try {
         $edited = [];
         $deletedIds = [];
         $lastId = 0;
+        $afterId = 0;
 
         if (!$metaOnly) {
-            $afterId = (int) ($_GET['after_id'] ?? 0);
+            // after_id / last_id / since: kirim hanya pesan baru (bukan seluruh riwayat).
+            $afterId = (int) ($_GET['after_id'] ?? $_GET['last_id'] ?? $_GET['since'] ?? 0);
             if ($afterId > 0) {
                 $statement = $pdo->prepare(pulseChatSelectColumns() . ' WHERE ' . $roomFilter . ' AND id > :after_id AND deleted_at IS NULL ORDER BY id ASC LIMIT 50');
                 $statement->execute(array_merge($roomParams, ['after_id' => $afterId]));
@@ -744,9 +745,7 @@ try {
             }
         }
 
-        $groupIds = array_map(static fn (array $group): int => (int) $group['id'], $groups);
-
-        pulseRespond([
+        $payload = [
             'room' => $isDm ? 'dm' : 'group',
             'group_id' => $groupId,
             'peer' => $peer,
@@ -755,12 +754,22 @@ try {
             'edited' => $edited,
             'deleted_ids' => $deletedIds,
             'last_id' => $lastId,
-            'users' => pulseChatAllUsers($pdo, $me),
-            'groups' => $groups,
-            'unread' => pulseChatUnread($pdo, $me, $groupIds),
-            'can_manage_groups' => $isAdmin,
             'server_time' => time(),
-        ]);
+        ];
+
+        // Daftar user/grup/unread hanya dikirim saat memang dibutuhkan klien
+        // (muat awal atau heartbeat), bukan pada setiap polling pesan baru.
+        // Ini memangkas payload polling secara signifikan tanpa mengubah fitur.
+        if ($metaOnly || $afterId <= 0) {
+            $groups = pulseChatUserGroups($pdo, $user);
+            $groupIds = array_map(static fn (array $group): int => (int) $group['id'], $groups);
+            $payload['users'] = pulseChatAllUsers($pdo, $me);
+            $payload['groups'] = $groups;
+            $payload['unread'] = pulseChatUnread($pdo, $me, $groupIds);
+            $payload['can_manage_groups'] = $isAdmin;
+        }
+
+        pulseRespond($payload);
     }
 
     // POST: satu endpoint dengan field "action" memakai sesi login aktif.

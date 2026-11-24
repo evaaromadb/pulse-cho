@@ -11,12 +11,15 @@
 FROM php:8.3-apache
 
 RUN docker-php-ext-install pdo_mysql opcache \
-    && a2enmod headers \
+    && a2enmod headers expires \
     && printf '<Directory /var/www/html>\nAllowOverride All\nRequire all granted\n</Directory>\n' > /etc/apache2/conf-available/pulse-app.conf \
     && a2enconf pulse-app
 
 # Konfigurasi PHP aplikasi (upload 250 MB, memory 1.5 GB, tanpa output buffering)
 COPY api/php.ini /usr/local/etc/php/conf.d/pulse.ini
+
+# Kebijakan cache/Vary untuk aset statis (hemat bandwidth).
+COPY .htaccess /var/www/html/.htaccess
 
 # Halaman aplikasi di root: https://<domain>/
 COPY index.html /var/www/html/index.html
