@@ -1212,6 +1212,11 @@
           <span id="cloud-sync-badge" class="px-2 py-0.5 rounded-md border border-slate-600 bg-slate-800/80 text-slate-300 text-[10px] font-mono font-bold">
             ☁ Memeriksa cloud...
           </span>
+          <button id="cloud-sync-btn" type="button" onclick="syncDatasetFromCloud()"
+            class="px-2.5 py-1 rounded-lg bg-sky-600/20 hover:bg-sky-600/35 border border-sky-500/40 text-[11px] font-semibold text-sky-300 transition cursor-pointer disabled:opacity-50"
+            title="Unduh ulang dataset terbaru dari TiDB (hemat kuota: hanya saat diperlukan)">
+            🔄 Muat data
+          </button>
           <button id="reset-data-btn" type="button" onclick="resetDashboardData()"
             class="px-2.5 py-1 rounded-lg bg-red-600/20 hover:bg-red-600/35 border border-red-500/40 text-[11px] font-semibold text-red-300 transition cursor-pointer"
             title="Kosongkan seluruh data tiket saat ini (Khusus Admin)">
@@ -2651,13 +2656,18 @@
       });
     }
 
-    async function saveUploadedRowsToDb(rows) {
+    /**
+     * Simpan dataset ke cache IndexedDB. `version` = penanda versi dataset
+     * (saved_at|row_count) supaya bisa dibandingkan dengan metadata server
+     * tanpa mengunduh ulang seluruh baris.
+     */
+    async function saveUploadedRowsToDb(rows, version = null) {
       try {
         const db = await openPulseIndexedDb();
         await new Promise((resolve, reject) => {
           const tx = db.transaction(PULSE_DB_STORE, 'readwrite');
           const store = tx.objectStore(PULSE_DB_STORE);
-          store.put({ rows: rows || [], savedAt: Date.now() }, PULSE_DB_RECORD_KEY);
+          store.put({ rows: rows || [], savedAt: Date.now(), version: version || null }, PULSE_DB_RECORD_KEY);
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
         });
@@ -2667,7 +2677,10 @@
       }
     }
 
-    async function loadUploadedRowsFromDb() {
+    /**
+     * Baca record cache IndexedDB lengkap: { rows, version, savedAt }.
+     */
+    async function loadCachedDatasetRecord() {
       try {
         const db = await openPulseIndexedDb();
         const result = await new Promise((resolve, reject) => {
@@ -2678,11 +2691,17 @@
           req.onerror = () => reject(req.error);
         });
         db.close();
-        return result && Array.isArray(result.rows) ? result.rows : null;
+        if (!result || !Array.isArray(result.rows)) return null;
+        return { rows: result.rows, version: result.version || null, savedAt: result.savedAt || null };
       } catch (err) {
         console.warn('Gagal memuat dari IndexedDB:', err);
         return null;
       }
+    }
+
+    async function loadUploadedRowsFromDb() {
+      const record = await loadCachedDatasetRecord();
+      return record ? record.rows : null;
     }
 
     async function clearUploadedRowsFromDb() {
@@ -2710,7 +2729,7 @@
       updateCloudSyncBadge();
       try {
         await writePulseDatasetToCloud(rows, savedBy);
-        await saveUploadedRowsToDb(rows);
+        await saveUploadedRowsToDb(rows, pulseCloudLastVersion);
         return { ok: true };
       } catch (err) {
         console.error('Gagal mengganti dataset di cloud:', err);
@@ -2784,7 +2803,7 @@
 
         const full = await readPulseDatasetFromCloud({ metaOnly: false });
         if (full && Array.isArray(full.rows) && full.rows.length > 0) {
-          await saveUploadedRowsToDb(full.rows);
+          await saveUploadedRowsToDb(full.rows, full.version);
           ingestAndFilterData(full.rows);
           window.applyAutoMonthRangeFromData(false);
           window.showToast(`Data terbaru dari cloud dimuat (${full.rows.length.toLocaleString('id-ID')} baris${full.savedBy ? ', oleh ' + full.savedBy : ''}).`, 'info');
@@ -2810,45 +2829,92 @@
     }
 
     /**
-     * Muat dataset: cloud dulu, lalu cache lokal sebagai fallback offline.
+     * Muat dataset dengan strategi hemat bandwidth:
+     *   1) Cek metadata ringan dulu (< 1 KB: row_count + saved_at, tanpa baris).
+     *   2) Jika versi metadata server SAMA dengan versi cache IndexedDB, muat
+     *      langsung dari cache lokal — tanpa mengunduh puluhan ribu baris.
+     *   3) Unduh penuh hanya bila ada upload baru di TiDB atau `force` = true
+     *      (dipakai tombol "Muat data" / sync manual).
      */
-    async function loadActiveDataset() {
-      let cloudError = null;
-      if (isPulseCloudEnabled()) {
-        setPulseSyncBadge('☁ Memuat data...', 'sky');
-        const badgeEl = document.getElementById('upload-status-badge');
+    async function loadActiveDataset({ force = false } = {}) {
+      if (!isPulseCloudEnabled()) {
+        updateCloudSyncBadge();
+        return loadUploadedRowsFromDb();
+      }
+
+      setPulseSyncBadge('☁ Memeriksa data...', 'sky');
+      const badgeEl = document.getElementById('upload-status-badge');
+
+      try {
+        const meta = await readPulseDatasetFromCloud({ metaOnly: true });
+        pulseCloudLastVersion = meta.version || null;
+        pulseCloudLastSavedBy = meta.savedBy;
+        pulseCloudLastSavedAt = meta.savedAt;
+        pulseCloudLastVersionUpdated = true;
+
+        if (!meta.version) {
+          // Cloud kosong: bersihkan cache lokal dan tampilkan dashboard kosong.
+          await clearUploadedRowsFromDb();
+          updateCloudSyncBadge();
+          return [];
+        }
+
+        // Versi cache cocok dengan server -> pakai IndexedDB (hemat bandwidth).
+        const cached = await loadCachedDatasetRecord();
+        if (!force && cached && cached.version && cached.version === meta.version && cached.rows.length > 0) {
+          updateCloudSyncBadge();
+          return cached.rows;
+        }
+
+        // Perlu unduh penuh: data baru di TiDB atau sync manual.
         if (badgeEl && rawUploadedRows.length === 0) {
           badgeEl.textContent = 'Memuat dataset dari TiDB...';
         }
-        try {
-          const cloud = await readPulseDatasetFromCloud({ metaOnly: false });
-          pulseCloudLastVersion = cloud.version;
-          pulseCloudLastSavedBy = cloud.savedBy;
-          pulseCloudLastSavedAt = cloud.savedAt;
-          pulseCloudLastVersionUpdated = true;
-          updateCloudSyncBadge();
-          if (Array.isArray(cloud.rows)) {
-            // Cache lokal hanya untuk mode offline, jadi tidak ditunggu di jalur kritis
-            if (cloud.rows.length > 0) saveUploadedRowsToDb(cloud.rows);
-            else clearUploadedRowsFromDb();
-            return cloud.rows;
-          }
-          return [];
-        } catch (err) {
-          cloudError = err;
-          console.warn('Gagal memuat dataset dari cloud, fallback ke cache lokal:', err);
-          setPulseSyncBadge('☁ Cloud offline (pakai cache)', 'red');
-        }
-      } else {
+        const cloud = await readPulseDatasetFromCloud({ metaOnly: false });
+        pulseCloudLastVersion = cloud.version || meta.version;
+        pulseCloudLastSavedBy = cloud.savedBy;
+        pulseCloudLastSavedAt = cloud.savedAt;
+        pulseCloudLastVersionUpdated = true;
         updateCloudSyncBadge();
+        if (Array.isArray(cloud.rows)) {
+          // Simpan ke cache (tanpa ditunggu di jalur kritis) beserta versinya.
+          if (cloud.rows.length > 0) saveUploadedRowsToDb(cloud.rows, cloud.version);
+          else clearUploadedRowsFromDb();
+          return cloud.rows;
+        }
+        return [];
+      } catch (err) {
+        console.warn('Gagal memuat dataset dari cloud, fallback ke cache lokal:', err);
+        setPulseSyncBadge('☁ Cloud offline (pakai cache)', 'red');
+        const cachedRows = await loadUploadedRowsFromDb();
+        if (cachedRows && cachedRows.length > 0) {
+          window.showToast('Gagal menghubungi cloud. Menampilkan data cache terakhir di browser ini.', 'error');
+        }
+        return cachedRows;
       }
-
-      const cachedRows = await loadUploadedRowsFromDb();
-      if (cloudError && cachedRows && cachedRows.length > 0) {
-        window.showToast('Gagal menghubungi cloud. Menampilkan data cache terakhir di browser ini.', 'error');
-      }
-      return cachedRows;
     }
+
+    /**
+     * Sync manual: paksa unduh ulang dataset terbaru dari TiDB (tombol "Muat data").
+     * Tanpa aksi ini, dataset tetap dimuat dari cache IndexedDB saat versinya sama.
+     */
+    window.syncDatasetFromCloud = async function syncDatasetFromCloud() {
+      if (window.PULSE_SYNC_IN_FLIGHT) return;
+      window.PULSE_SYNC_IN_FLIGHT = true;
+      const btn = document.getElementById('cloud-sync-btn');
+      if (btn) btn.disabled = true;
+      try {
+        const rows = await loadActiveDataset({ force: true });
+        ingestAndFilterData(rows || []);
+        window.applyAutoMonthRangeFromData(false);
+        window.showToast(`Dataset dimuat ulang dari TiDB (${(rows || []).length.toLocaleString('id-ID')} baris).`, 'success');
+      } catch (err) {
+        window.showToast(`Gagal memuat ulang dataset: ${err.message || err}`, 'error');
+      } finally {
+        window.PULSE_SYNC_IN_FLIGHT = false;
+        if (btn) btn.disabled = false;
+      }
+    };
 
     // Filter State
     let globalSiteFilter = 'ALL';
