@@ -2462,12 +2462,11 @@
     const PULSE_DB_NAME = 'PulseChoStorageDB_v1';
     const PULSE_DB_STORE = 'uploaded_rows_store';
     const PULSE_DB_RECORD_KEY = 'active_dataset_v1';
-    const PULSE_CLOUD_POLL_MS = 60000;
 
     let pulseCloudLastVersion = null;
     let pulseCloudLastSavedBy = null;
     let pulseCloudLastSavedAt = null;
-    let pulseCloudPollTimer = null;
+    let pulseCloudRefreshBound = false;
     let pulseCloudSaveInFlight = false;
 
     function getPulseCloudConfig() {
@@ -2796,23 +2795,18 @@
       }
     }
 
+    /**
+     * Pemeriksaan pembaruan dataset TANPA polling latar belakang.
+     * Tidak ada setInterval: pengecekan hanya terjadi saat pengguna kembali
+     * membuka tab (visibilitychange) atau lewat aksi manual, sehingga tidak ada
+     * request otomatis yang berjalan terus-menerus (hemat bandwidth & Render).
+     */
     function startCloudDatasetPolling() {
-      stopCloudDatasetPolling();
-      if (!isPulseCloudEnabled()) return;
-      pulseCloudPollTimer = setInterval(() => {
-        if (document.hidden) return;
-        checkCloudDatasetFreshness({ silent: true });
-      }, PULSE_CLOUD_POLL_MS);
+      if (!isPulseCloudEnabled() || pulseCloudRefreshBound) return;
+      pulseCloudRefreshBound = true;
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) checkCloudDatasetFreshness({ silent: true });
       });
-    }
-
-    function stopCloudDatasetPolling() {
-      if (pulseCloudPollTimer) {
-        clearInterval(pulseCloudPollTimer);
-        pulseCloudPollTimer = null;
-      }
     }
 
     /**

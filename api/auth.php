@@ -108,6 +108,11 @@ try {
         $clearAttempts = $pdo->prepare('DELETE FROM pulse_auth_attempts WHERE attempt_key = :attempt_key');
         $clearAttempts->execute(['attempt_key' => $attemptKey]);
         $pdo->exec('DELETE FROM pulse_sessions WHERE expires_at <= UTC_TIMESTAMP()');
+        // Satu sesi aktif per user: login di perangkat baru otomatis menonaktifkan
+        // seluruh sesi lama user tersebut (perangkat lama akan menerima 401 dan
+        // diminta login ulang, tanpa memicu loop request).
+        $revokeOldSessions = $pdo->prepare('DELETE FROM pulse_sessions WHERE username = :username');
+        $revokeOldSessions->execute(['username' => $account['username']]);
         $token = bin2hex(random_bytes(32));
         $statement = $pdo->prepare(
             'INSERT INTO pulse_sessions (token_hash, username, expires_at)
